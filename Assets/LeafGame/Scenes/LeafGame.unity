@@ -1,0 +1,315 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!29 &1
+OcclusionCullingSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_OcclusionBakeSettings:
+    smallestOccluder: 5
+    smallestHole: 0.25
+    backfaceThreshold: 100
+  m_SceneGUID: 00000000000000000000000000000000
+  m_OcclusionCullingData: {fileID: 0}
+--- !u!104 &2
+RenderSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 10
+  m_Fog: 0
+  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
+  m_FogMode: 3
+  m_FogDensity: 0.01
+  m_LinearFogStart: 0
+  m_LinearFogEnd: 300
+  m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
+  m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
+  m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
+  m_AmbientIntensity: 1
+  m_AmbientMode: 0
+  m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
+  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  m_HaloStrength: 0.5
+  m_FlareStrength: 1
+  m_FlareFadeSpeed: 3
+  m_HaloTexture: {fileID: 0}
+  m_SpotCookie: {fileID: 10001, guid: 0000000000000000e000000000000000, type: 0}
+  m_DefaultReflectionMode: 0
+  m_DefaultReflectionResolution: 128
+  m_ReflectionBounces: 1
+  m_ReflectionIntensity: 1
+  m_CustomReflection: {fileID: 0}
+  m_Sun: {fileID: 0}
+  m_UseRadianceAmbientProbe: 0
+--- !u!157 &3
+LightmapSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 13
+  m_BakeOnSceneLoad: 0
+  m_GISettings:
+    serializedVersion: 2
+    m_BounceScale: 1
+    m_IndirectOutputScale: 1
+    m_AlbedoBoost: 1
+    m_EnvironmentLightingMode: 0
+    m_EnableBakedLightmaps: 1
+    m_EnableRealtimeLightmaps: 0
+  m_LightmapEditorSettings:
+    serializedVersion: 12
+    m_Resolution: 2
+    m_BakeResolution: 40
+    m_AtlasSize: 1024
+    m_AO: 0
+    m_AOMaxDistance: 1
+    m_CompAOExponent: 1
+    m_CompAOExponentDirect: 0
+    m_ExtractAmbientOcclusion: 0
+    m_Padding: 2
+    m_LightmapParameters: {fileID: 0}
+    m_LightmapsBakeMode: 1
+    m_TextureCompression: 1
+    m_ReflectionCompression: 2
+    m_MixedBakeMode: 2
+    m_BakeBackend: 2
+    m_PVRSampling: 1
+    m_PVRDirectSampleCount: 32
+    m_PVRSampleCount: 512
+    m_PVRBounces: 2
+    m_PVREnvironmentSampleCount: 256
+    m_PVREnvironmentReferencePointCount: 2048
+    m_PVRFilteringMode: 1
+    m_PVRDenoiserTypeDirect: 1
+    m_PVRDenoiserTypeIndirect: 1
+    m_PVRDenoiserTypeAO: 1
+    m_PVRFilterTypeDirect: 0
+    m_PVRFilterTypeIndirect: 0
+    m_PVRFilterTypeAO: 0
+    m_PVREnvironmentMIS: 1
+    m_PVRCulling: 1
+    m_PVRFilteringGaussRadiusDirect: 1
+    m_PVRFilteringGaussRadiusIndirect: 1
+    m_PVRFilteringGaussRadiusAO: 1
+    m_PVRFilteringAtrousPositionSigmaDirect: 0.5
+    m_PVRFilteringAtrousPositionSigmaIndirect: 2
+    m_PVRFilteringAtrousPositionSigmaAO: 1
+    m_ExportTrainingData: 0
+    m_TrainingDataDestination: TrainingData
+    m_LightProbeSampleCountMultiplier: 4
+  m_LightingDataAsset: {fileID: 20201, guid: 0000000000000000f000000000000000, type: 0}
+  m_LightingSettings: {fileID: 0}
+--- !u!196 &4
+NavMeshSettings:
+  serializedVersion: 2
+  m_ObjectHideFlags: 0
+  m_BuildSettings:
+    serializedVersion: 3
+    agentTypeID: 0
+    agentRadius: 0.5
+    agentHeight: 2
+    agentSlope: 45
+    agentClimb: 0.4
+    ledgeDropHeight: 0
+    maxJumpAcrossDistance: 0
+    minRegionArea: 2
+    manualCellSize: 0
+    cellSize: 0.16666667
+    manualTileSize: 0
+    tileSize: 256
+    buildHeightMesh: 0
+    maxJobWorkers: 0
+    preserveTilesOutsideBounds: 0
+    debug:
+      m_Flags: 0
+  m_NavMeshData: {fileID: 0}
+--- !u!1 &234429825
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 234429827}
+  - component: {fileID: 234429826}
+  m_Layer: 0
+  m_Name: Leaf Game Controller
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &234429826
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 234429825}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 666fc69aef0a44741b0db72c653dda2a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::LeafGame.LeafGameController
+  backgroundTextureResource: LeafGame/BackgroundTexture
+  cueBottomMarginPx: 24
+  panelSrgb: {r: 0.039215688, g: 0.11764706, b: 0.16470589, a: 0.8784314}
+  softPanelSrgb: {r: 0.93333334, g: 0.9529412, b: 0.9254902, a: 0.9098039}
+  accentSrgb: {r: 0.21176471, g: 0.61960787, b: 0.3764706, a: 1}
+  accentHoverSrgb: {r: 0.2627451, g: 0.70980394, b: 0.4392157, a: 1}
+  secondaryButtonSrgb: {r: 0.20392157, g: 0.29803923, b: 0.34901962, a: 0.9607843}
+  welcomeSubtitle: Follow the leaves. Find your focus. Trust your direction.
+  playButtonLabel: Play
+  settingsButtonLabel: Settings
+  backButtonLabel: Back
+  timeBoardLabel: TIME
+  scoreBoardLabel: SCORE
+  trialsPerBlock: 24
+  cueC1Probability: 0.5
+  useFixedRandomSeed: 0
+  fixedRandomSeed: 918273
+  mixParticipantAndBlockIntoSeed: 1
+  PreCueConstantSec: 1
+  PreCueExpMeanSec: 3
+  PreCueExpMaxSec: 5
+  NfRevealTimeoutSec: 10
+  ResponseTimeoutSec: 4
+  FeedbackSec: 1
+  ItiSec: 1
+  nfSourceType: 1
+  nfFilePath: C:\Users\Kalyanbrata\Documents\MATLAB\FeatureAttention\nf.txt
+  nfPathMaximumCharacters: 1024
+  nfTcpHost: 10.36.17.144
+  nfTcpPort: 5006
+  nfTcpTimeoutSec: 10
+  nfStreamStallWarnSec: 2
+  dataFolderName: data
+  NfTraceIntervalSec: 0.1
+  NfGreenHoldSec: 1
+  NfRatePerUnitPerSec: 3
+  NfClip: 1
+  NfWhiteTopRelaxation: 0.1
+  frequencyC1Hz: 19
+  frequencyC2Hz: 23
+  precomputedPhaseHorizonSec: 300
+  phaseHorizonSafetyMarginSec: 2
+  ssvepMeanLuminance: 0.5
+  ssvepModulationDepth: 1
+  phaseC1Degrees: 0
+  phaseC2Degrees: 0
+  requestedDisplayRefreshRateHz: 120
+  targetFrameRateOverride: 0
+  verticalSyncCount: 1
+  requestClosestSupportedRefreshRate: 1
+  abortTrialOnRefreshRateChange: 1
+  refreshRateChangeToleranceHz: 0.5
+  minimumValidRefreshHz: 30
+  fallbackRefreshHz: 60
+  presentationLookAheadFrames: 1
+  runInBackground: 1
+  preventScreenSleep: 1
+  triggerPort: 5007
+  resetTrigger: 0
+  trialStartTrigger: 20
+  cueOnsetTrigger: 45
+  successTrigger: 50
+  responseTrigger: 40
+  trialStopTrigger: 30
+  useResponsiveSizing: 1
+  referenceShortSidePx: 1080
+  minimumScreenScale: 0.25
+  maximumScreenScale: 4
+  autoFitMinimumFraction: 0.35
+  autoFitStepFraction: 0.05
+  stimulusWidthFraction: 1
+  stimulusHeightFraction: 1
+  safeAreaPaddingReferencePx: 0
+  leafSizePx: 100
+  leafWidthMultiplier: 0.42
+  leafBorderMultiplier: 0.2
+  leafSpeedPxPerSec: 200
+  leavesPerFlock: 10
+  laneClearanceMarginPx: 6
+  maxFieldShrinkPx: 400
+  minRepeatsPerAxis: 2
+  leafArcPoints: 10
+  verifyLeafPathsAtSetup: 1
+  verificationMaxFrames: 40000
+  cueWidthPx: 220
+  cueHeightPx: 90
+  cueCornerRadiusPx: 20
+  cueCornerSegments: 8
+  cueFontSize: 64
+  cueCharacterSize: 0.5
+  cueTextOutlinePx: 2
+  enableKeyboardArrows: 1
+  enableSwipeResponses: 1
+  escapeEndsBlock: 1
+  swipeThresholdPx: 40
+  c1Srgb: {r: 0, g: 0.7490196, b: 1, a: 1}
+  c2Srgb: {r: 1, g: 0.54901963, b: 0, a: 1}
+  cuePreSrgb: {r: 0.2509804, g: 0.2509804, b: 0.2509804, a: 1}
+  successSrgb: {r: 0, g: 1, b: 0, a: 1}
+  failureSrgb: {r: 1, g: 0, b: 0, a: 1}
+  greenZoneSrgb: {r: 0.7019608, g: 1, b: 0.7019608, a: 1}
+  backgroundSrgb: {r: 0, g: 0, b: 0, a: 1}
+  preCueLeafFillSrgb: {r: 0, g: 0, b: 0, a: 1}
+  cueTextSrgb: {r: 0, g: 0, b: 0, a: 1}
+  cueTextOutlineSrgb: {r: 1, g: 1, b: 1, a: 1}
+  instructionBorderSrgb: {r: 1, g: 1, b: 1, a: 1}
+  uiReferenceShortSidePx: 1080
+  minimumUiScale: 0.15
+  maximumUiScale: 4
+  titleFontSize: 35
+  bodyFontSize: 25
+  centerFontSize: 22
+  buttonFontSize: 26
+  applicationTitle: Leaf Game - Direction Response
+  participantLabel: Participant number
+  blockLabel: Block number
+  continueButtonLabel: Continue
+  beginBlockButtonLabel: Begin block
+  cueC1Word: Pointing
+  cueC2Word: Moving
+  correctFeedbackText: Correct
+  incorrectFeedbackText: Incorrect
+  missedResponseText: missed
+  completedTitle: TESTING COMPLETED!
+  instructionC1Label: This color -> use its POINTING direction
+  instructionC2Label: This color -> use its MOVING direction
+  nfPathLabel: 'NF file: '
+  resolvedNfPathLabel: 'Resolved NF path: '
+  instructionsText: 'INSTRUCTIONS
+
+
+    Two groups of leaves move around the screen.
+    Each group points in one direction and moves in another (up / down / left / right),
+    independently.
+
+
+    At first only the flickering outlines are visible. The centre
+    box turns a color and shows Pointing or Moving. Concentrating on that group brightens
+    the leaves. Hold them green to reveal their true colors.
+
+
+    Only then answer
+    with an arrow key or a swipe. Earlier responses are ignored.'
+  participant: 000
+  block: 000
+--- !u!4 &234429827
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 234429825}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1660057539 &9223372036854775807
+SceneRoots:
+  m_ObjectHideFlags: 0
+  m_Roots:
+  - {fileID: 234429827}

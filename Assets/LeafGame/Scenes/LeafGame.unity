@@ -173,7 +173,7 @@ MonoBehaviour:
   ResponseTimeoutSec: 4
   FeedbackSec: 1
   ItiSec: 1
-  nfSourceType: 1
+  nfSourceType: 2
   nfFilePath: C:\Users\Kalyanbrata\Documents\MATLAB\FeatureAttention\nf.txt
   nfPathMaximumCharacters: 1024
   nfTcpHost: 10.36.17.144

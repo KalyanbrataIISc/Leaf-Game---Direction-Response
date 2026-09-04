@@ -24,6 +24,7 @@ namespace BciCore
         readonly LogQueue _feat;
         readonly LogQueue _hlth;
 
+        public string SessionDir   { get; }
         public string RawPath      { get; }
         public string SignalsPath  { get; }
         public string FeaturesPath { get; }
@@ -34,32 +35,33 @@ namespace BciCore
         public CsvSessionLogger(string logDir, int numCh = 32, bool ssvepPerChannel = false)
         {
             string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            Directory.CreateDirectory(logDir);
+            SessionDir = Path.Combine(logDir, $"eeg_{ts}");
+            Directory.CreateDirectory(SessionDir);
 
             // ── raw ──
-            RawPath = Path.Combine(logDir, $"eeg_{ts}_raw.csv");
+            RawPath = Path.Combine(SessionDir, $"eeg_{ts}_raw.csv");
             string rawHdr = "seq," + Join("raw", numCh) + ",marker";
             _raw = new LogQueue(RawPath, rawHdr);
 
             // ── signals ──
-            SignalsPath = Path.Combine(logDir, $"eeg_{ts}_signals.csv");
+            SignalsPath = Path.Combine(SessionDir, $"eeg_{ts}_signals.csv");
             string sigHdr = "seq," + Join("filt", numCh) + ",marker";
             _sig = new LogQueue(SignalsPath, sigHdr);
 
             // ── features ──
-            FeaturesPath = Path.Combine(logDir, $"eeg_{ts}_features.csv");
+            FeaturesPath = Path.Combine(SessionDir, $"eeg_{ts}_features.csv");
             string featHdr = "seq,marker,smi_14gt18,smi_18gt14,smi_14gt18_shaped,smi_18gt14_shaped,"
                            + "alphaNF,ssvepNF,alphaLeft,alphaRight,ssvepRight14,ssvepLeft18,"
                            + JoinIndexed("alpha", 8);
             _feat = new LogQueue(FeaturesPath, featHdr);
 
             // ── health ──
-            HealthPath = Path.Combine(logDir, $"eeg_{ts}_health.csv");
+            HealthPath = Path.Combine(SessionDir, $"eeg_{ts}_health.csv");
             const string hlthHdr = "wall_clock,board_ms,seq,board_drops,pc_gaps,board_bad,"
                                  + "board_miss,board_dspmax_us,srv_bad,free_heap,marker,event";
             _hlth = new LogQueue(HealthPath, hlthHdr);
 
-            Debug.Log($"[BciCore] Logging → {logDir}");
+            Debug.Log($"[BciCore] Logging session started → {SessionDir}");
         }
 
         // ── Raw frame ────────────────────────────────────────────────────────

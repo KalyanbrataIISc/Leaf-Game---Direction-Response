@@ -33,6 +33,7 @@ namespace BciCore
 
         // ── Session logger ────────────────────────────────────────────────────
         static CsvSessionLogger _logger;
+        public static string CurrentSessionDir => _logger?.SessionDir;
         static bool             _enableLogging = true;
         static string           _logDir;
         // Buffered alpha for features.csv correlation (seq → alpha[])

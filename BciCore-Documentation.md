@@ -20,7 +20,7 @@
 | NF fan-out | TCP port 5006 | **In-process event** (`BciServer.OnNfSample`) |
 | `nf.txt` | Written at 10 Hz | **Removed** — values go in-process |
 | Parity check | Yes (FIR filter replica) | **Removed** (validated) |
-| Calibration GUI | Python Tkinter window | **Unity IMGUI overlay** |
+| Calibration GUI | Python PyQt5 GUI (`bci_gui_v2.py`) | **Unity IMGUI overlay** (Raw + Real-time FFT) |
 | Logging | 4-file CSV | **Same 4-file CSV** (async) |
 | UDP marker input (5007) | Yes | **Removed** (in-process via `BciServer.SendMarker`) |
 
@@ -41,8 +41,8 @@ org.iisc.bcicore.server/
     │   ├── EspTcpListener.cs            TCP server core (recv/process threads)
     │   └── MainThreadDispatcher.cs      Background→Unity main thread marshaller
     ├── Processing/
-    │   ├── ChannelRingBuffer.cs         Per-channel rolling sample buffer
-    │   └── FftAnalyzer.cs              Radix-2 FFT → single-sided spectrum
+    │   ├── ChannelRingBuffer.cs         Per-channel rolling sample buffer (thread-safe)
+    │   └── FftAnalyzer.cs               Radix-2 FFT + real-time power spectrum (get_fft parity)
     ├── Logging/
     │   ├── LogQueue.cs                  Async log queue (background writer thread)
     │   └── CsvSessionLogger.cs          4-file CSV logger (same columns as Python)
@@ -151,9 +151,10 @@ BciServer.ExitCalibrationMode();    // stops routing heavy events
 bool sent = BciServer.SendMarker(int code);   // sends CMD frame 0x08 to ESP32
 
 // ── Properties
-BciConfig cfg     = BciServer.Config;    // fs, numCh, uvPerCount (from HELLO)
-ConnectionState s = BciServer.State;     // Disconnected / Listening / Connected
-bool inCalib      = BciServer.CalibrationMode;
+BciConfig cfg          = BciServer.Config;          // fs, numCh, uvPerCount (from HELLO)
+ConnectionState s      = BciServer.State;           // Disconnected / Listening / Connected
+bool inCalib           = BciServer.CalibrationMode;
+ChannelRingBuffer ring = BciServer.RingBuffer;      // public rolling sample buffer (2500 samples/ch)
 
 // ── Events (main thread)
 BciServer.OnHello               += (BciConfig cfg) => { };
@@ -205,20 +206,34 @@ When `nfSourceType == NfSourceType.BciCore`, `LeafGameController.ApplySettingsAn
 
 ### Channel Selection
 
-Both tabs (Raw and FFT) have independent per-channel checkboxes. The operator toggles which channels to display. All 32 channels can be shown simultaneously or any subset.
+- Both tabs (Raw and FFT) feature an **8-column channel toggle grid** (Row 1: CH1–8, Row 2: CH9–16, Row 3: CH17–24, Row 4: CH25–32) with colored indicator boxes.
+- **Channels 9 to 16 are selected by default** on startup (8 primary analysis/SSVEP channels).
+- The operator can toggle any other channels on/off individually.
+- Convenient preset buttons are provided in the selector header:
+  - **`[CH 9–16 (Default)]`** — Quickly restores the 8 primary experiment channels.
+  - **`[Select All]`** — Enables all 32 channels.
+  - **`[Clear]`** — Clears selection.
 
-### Multi-Channel Raw Tab Options
+### Multi-Channel Raw Tab
 
+- Stacks active channels in individual waveform rows. When 8 channels (CH9–16) are active, they neatly fill the vertical view without scrolling.
+- Waveform GL lines are strictly bounded and clamped to channel row limits and plot bounds.
 - **Remove DC (Centred)** — subtracts per-channel mean before drawing.
-- **Autoscale Y** — auto-ranges to the data peak per channel.
+- **Autoscale Y** — auto-ranges each channel to its data peak.
 - **±Range µV** — fixed symmetric Y axis (editable text field, active when Autoscale is off).
 
-### FFT Spectrum Tab
+### FFT Spectrum Tab (Real-Time Power Spectrum)
 
-- Computed at ~4 Hz from the ring buffer snapshot.
-- Uses Hann-windowed radix-2 FFT (`FftAnalyzer`).
-- **Max Hz** field controls the displayed frequency range (default 60 Hz).
-- Each channel is independently scaled to its own spectral peak.
+Directly ported from `FFTTab` in `bci_gui_v2.py`:
+- **Real-Time Live Processing:** Recomputed at **~12.5 Hz** (every 80 ms, matching PyQt) using `FftAnalyzer.ComputeRealtimePowerSpectrum` over the last 500 samples (`FFT_NPTS = 500`, 2 seconds at 250 SPS).
+- **Processing Pipeline:** Per-channel mean subtraction, linear detrend (`seg - polyval(p, t)`), single-sided power spectrum $P_1 = 2 \cdot (|Y| / N)^2$, and DC bin zeroing (`pwr[0] = 0`).
+- **Overlaid Graph:** All selected channels are plotted simultaneously on a single unified XY graph in their distinct channel colors.
+- **Top Controls:**
+  - **X Max (Hz):** Configurable frequency span (default 60 Hz).
+  - **Autoscale Y:** Dynamically scales to `peak * 1.3f` across all enabled channels for frequencies > 0.5 Hz (matching `bci_gui_v2.py:663`).
+  - **Fixed Y:** Manual Y max value when Autoscale is unchecked (default 100).
+- **Overlay Legend:** Semi-transparent panel in the upper-left of the plot displaying channel color swatches and labels (`— CH9`, `— CH10`, etc.).
+- **No Accumulator Lag:** Instantaneous real-time spectral response to head movement, eyes closing, or SSVEP flicker.
 
 ---
 
@@ -244,7 +259,10 @@ For `File` and `Tcp` modes, `AppState.Calibration` is never entered — flow goe
 
 ## CSV Logging
 
-Four files per connection run, written to `Application.persistentDataPath/BciCoreLogs/`:
+For each connection run, a dedicated timestamped folder is created inside the logs directory:
+`Application.persistentDataPath/BciCoreLogs/eeg_<yyyyMMdd_HHmmss>/`
+
+Inside this folder, all four CSV files for that specific run are saved:
 
 | File | Contents |
 |---|---|
@@ -255,10 +273,12 @@ Four files per connection run, written to `Application.persistentDataPath/BciCor
 
 Column names and ordering **exactly match** `eeg_tcp_server.py` output.
 
-To use a custom log directory:
+To use a custom base log directory:
 
 ```csharp
 BciServer.StartServer(port: 5005, logDir: @"D:\MyLogs", enableLogging: true);
+// Active run directory path can be checked anytime via:
+string currentRunFolder = BciServer.CurrentSessionDir;
 ```
 
 ---
@@ -271,9 +291,10 @@ BciServer.StartServer(port: 5005, logDir: @"D:\MyLogs", enableLogging: true);
 4. Unity starts listening on port 5005. Status dot shows **Listening…**
 5. ESP32 connects → dot turns **Connected**, waveforms appear.
 6. Verify:
-   - **Frames / Sec** ≈ your configured SPS.
+   - **Frames / Sec** ≈ your configured SPS (e.g. 250).
    - Board ring drops and PC seq gaps stay at 0.
-   - FFT tab shows alpha peak (~10 Hz eyes-closed).
+   - Channels 9 to 16 appear by default on the Multi-Channel Raw tab.
+   - FFT tab shows live real-time FFT spectrum (prominent alpha peak ~10 Hz with eyes closed).
 7. Click **Proceed to Game** → Instructions screen → Trial.
 
 ---

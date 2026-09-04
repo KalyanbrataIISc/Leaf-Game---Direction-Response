@@ -13,7 +13,7 @@ namespace LeafGame
 {
     public enum Direction4 { Up, Down, Left, Right }
     public enum CueKind { C1, C2 }
-    public enum NfSourceType { File, Tcp }
+    public enum NfSourceType { File, Tcp, BciCore }
 
     [Serializable]
     public sealed class TrialDefinition

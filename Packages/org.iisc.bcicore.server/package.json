@@ -1,0 +1,10 @@
+{
+  "name": "org.iisc.bcicore.server",
+  "version": "1.0.0",
+  "displayName": "BciCore — In-Unity EEG TCP Server",
+  "description": "Hosts the EEG TCP server inside Unity. The ESP32 board connects in; the game reads neurofeedback values in-process. Provides a calibration screen with Multi-Channel Raw waveforms and FFT spectrum plots.",
+  "unity": "2022.3",
+  "author": {
+    "name": "IISc BCI Lab"
+  }
+}

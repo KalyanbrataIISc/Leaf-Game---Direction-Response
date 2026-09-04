@@ -9,12 +9,17 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 using UnityEngine.Serialization;
+using BciCore;
+
+#pragma warning disable 0414 // Serialized fields accessed via reflection in InitializeRuntimeSettings
 
 namespace LeafGame
 {
     public sealed partial class LeafGameController : MonoBehaviour
     {
-        enum AppState { Setup, Instructions, Trial, Iti, Summary, Fatal }
+        // AppState.Calibration is inserted between Setup and Instructions when
+        // nfSourceType == NfSourceType.BciCore.  All other paths skip it.
+        enum AppState { Setup, Calibration, Instructions, Trial, Iti, Summary, Fatal }
 
         sealed class RuntimeSetting
         {
@@ -177,6 +182,8 @@ namespace LeafGame
         INfReader nfReader;
         CsvLogger logger;
         System.Random rng;
+        // BciCore calibration screen — instantiated/destroyed around AppState.Calibration
+        CalibrationScreen _calibScreen;
         List<TrialDefinition> trials;
         TrialDefinition trial;
         List<LeafState> leaves;
@@ -244,7 +251,18 @@ namespace LeafGame
                 cueCornerSegments,cueFontSize,cueCharacterSize*activePixelScale,Render(cueTextOutlineSrgb),cueTextOutlinePx*activePixelScale,Render(backgroundSrgb),leavesPerFlock,leafArcPoints+1);
             InitializeAestheticGameplayBackground();
             triggers?.Dispose();
-            triggers=new TriggerSender(nfTcpHost.Trim(),triggerPort);triggers.Send("reset",resetTrigger);
+            if(nfSourceType==NfSourceType.BciCore)
+            {
+                // BciCore: start the in-process TCP server and send reset marker in-process.
+                BciServer.StartServer();
+                triggers=new TriggerSender(nfTcpHost.Trim(),triggerPort); // keep UDP path alive as fallback
+                BciServer.SendMarker(resetTrigger);
+            }
+            else
+            {
+                triggers=new TriggerSender(nfTcpHost.Trim(),triggerPort);
+                triggers.Send("reset",resetTrigger);
+            }
             visuals.ClearLeaves();visuals.SetCueVisible(false,Color.clear);
             runtimeInitialized=true;
         }
@@ -309,6 +327,8 @@ namespace LeafGame
         void OnDestroy()
         {
             if(state==AppState.Trial)triggers?.Send("trialstop",trialStopTrigger);
+            if(_calibScreen!=null){Destroy(_calibScreen);_calibScreen=null;}
+            if(nfSourceType==NfSourceType.BciCore)BciServer.StopServer();
             visuals?.Dispose();nfReader?.Dispose();triggers?.Dispose();DisposeAestheticPresentation();
         }
 
@@ -329,7 +349,24 @@ namespace LeafGame
             {
                 stylesScale=-1;
                 InitializeGameplayFromSettings();
-                BeginSession();
+                if(nfSourceType==NfSourceType.BciCore)
+                {
+                    // Enter calibration before proceeding to BeginSession.
+                    // CalibrationScreen calls BeginSession() when the operator clicks Proceed.
+                    state=AppState.Calibration;
+                    if(_calibScreen==null)
+                    {
+                        _calibScreen=gameObject.AddComponent<CalibrationScreen>();
+                        _calibScreen.OnProceedPressed=()=>{
+                            if(_calibScreen!=null){Destroy(_calibScreen);_calibScreen=null;}
+                            BeginSession();
+                        };
+                    }
+                }
+                else
+                {
+                    BeginSession();
+                }
             }
             catch(Exception e)
             {
@@ -356,6 +393,14 @@ namespace LeafGame
                     var tcpReader=new NfTcpReader(nfTcpHost,nfTcpPort);nfReader=tcpReader;sessionStarting=true;
                     nfConnectionStatus="Connecting to "+tcpReader.Description+" ...";
                     StartCoroutine(WaitForTcpAndCompleteSession(tcpReader));
+                }
+                else if(nfSourceType==NfSourceType.BciCore)
+                {
+                    // BciCoreNfReader reads smi_14gt18_shaped / smi_18gt14_shaped
+                    // directly from BciServer.OnNfSample — no TCP connection needed here.
+                    nfReader=new BciCoreNfReader();
+                    nfConnectionStatus="Receiving neurofeedback in-process (BciCore)";
+                    CompleteSessionStart();
                 }
                 else
                 {

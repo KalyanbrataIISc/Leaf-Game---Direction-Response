@@ -259,6 +259,12 @@
       },
       "url": "https://packages.unity.com"
     },
+    "org.iisc.bcicore.server": {
+      "version": "file:org.iisc.bcicore.server",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
+    },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",
       "depth": 0,

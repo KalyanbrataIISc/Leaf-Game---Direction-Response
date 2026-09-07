@@ -260,7 +260,7 @@ For `File` and `Tcp` modes, `AppState.Calibration` is never entered — flow goe
 ## CSV Logging
 
 For each connection run, a dedicated timestamped folder is created inside the logs directory:
-`Application.persistentDataPath/BciCoreLogs/eeg_<yyyyMMdd_HHmmss>/`
+`eeg_<yyyyMMdd_HHmmss>/`
 
 Inside this folder, all four CSV files for that specific run are saved:
 
@@ -273,8 +273,33 @@ Inside this folder, all four CSV files for that specific run are saved:
 
 Column names and ordering **exactly match** `eeg_tcp_server.py` output.
 
-To use a custom base log directory:
+---
 
+### Where Logs Are Saved
+
+#### 1. On Android Tablet
+All logs are written to Android's `Application.persistentDataPath`, which is the app's dedicated internal storage sandbox and **does not require special root or runtime storage permissions**:
+
+```
+/storage/emulated/0/Android/data/com.featureattention.leafdirectionresponse/files/BciCoreLogs/
+```
+
+Each run is stored in its own subfolder:
+```
+/storage/emulated/0/Android/data/com.featureattention.leafdirectionresponse/files/BciCoreLogs/eeg_<yyyyMMdd_HHmmss>/
+    ├── eeg_<ts>_raw.csv
+    ├── eeg_<ts>_signals.csv
+    ├── eeg_<ts>_features.csv
+    └── eeg_<ts>_health.csv
+```
+
+#### 2. On PC / Unity Editor
+```
+<Project-Root>/BciCoreLogs/eeg_<yyyyMMdd_HHmmss>/
+```
+*(Or in `%USERPROFILE%/AppData/LocalLow/DefaultCompany/LeafGame/BciCoreLogs/...` if running standalone PC build).*
+
+To specify a custom base log directory programmatically:
 ```csharp
 BciServer.StartServer(port: 5005, logDir: @"D:\MyLogs", enableLogging: true);
 // Active run directory path can be checked anytime via:
@@ -283,19 +308,118 @@ string currentRunFolder = BciServer.CurrentSessionDir;
 
 ---
 
-## Deployment Checklist
+### How to Access & Extract Logs from the Android Tablet
 
-1. **Power on ESP32** — confirm it is on the same network as the PC.
-2. **Open Unity, press Play.**
-3. In the setup screen, set `NF Source Type = BciCore`, then click **Apply & Continue**.
-4. Unity starts listening on port 5005. Status dot shows **Listening…**
-5. ESP32 connects → dot turns **Connected**, waveforms appear.
-6. Verify:
-   - **Frames / Sec** ≈ your configured SPS (e.g. 250).
-   - Board ring drops and PC seq gaps stay at 0.
-   - Channels 9 to 16 appear by default on the Multi-Channel Raw tab.
-   - FFT tab shows live real-time FFT spectrum (prominent alpha peak ~10 Hz with eyes closed).
-7. Click **Proceed to Game** → Instructions screen → Trial.
+There are **3 convenient methods** to retrieve the logs:
+
+#### Method 1: Via USB Cable to PC (Windows File Explorer / MTP) — Recommended for everyday use
+1. Connect the tablet to your PC using a USB-C cable.
+2. On the tablet, swipe down the notification shade, tap **Charging this device via USB**, and change it to **File Transfer / MTP**.
+3. On your PC, open **Windows File Explorer** and navigate to:
+   ```
+   This PC \ [Your Tablet Name] \ Internal shared storage \ Android \ data \ com.featureattention.leafdirectionresponse \ files \ BciCoreLogs \
+   ```
+4. Copy the `eeg_<timestamp>` folder directly to your PC for analysis.
+> [!NOTE]
+> While Android 11+ restricts some on-device third-party file manager apps from browsing `Android/data/`, connecting via **USB MTP to a PC bypasses this restriction completely** without requiring root or special permissions.
+
+#### Method 2: Via ADB Command Line — Fastest for developers
+If you have Android Platform Tools / ADB installed on your PC:
+1. Connect the tablet via USB with **USB Debugging** enabled.
+2. Open PowerShell or Command Prompt on your PC and run:
+   ```powershell
+   # Pull all session logs into a local "TabletLogs" folder:
+   adb pull /storage/emulated/0/Android/data/com.featureattention.leafdirectionresponse/files/BciCoreLogs/ ./TabletLogs/
+   ```
+3. To view the list of runs on the tablet directly from terminal:
+   ```powershell
+   adb shell ls -la /storage/emulated/0/Android/data/com.featureattention.leafdirectionresponse/files/BciCoreLogs/
+   ```
+
+#### Method 3: Directly On the Tablet
+1. Open a capable file manager app (e.g., **Files by Google**, **Total Commander**, or **Solid Explorer**).
+2. Browse to `Internal Storage` → `Android` → `data` → `com.featureattention.leafdirectionresponse` → `files` → `BciCoreLogs`.
+3. Select the session folder and share it via Google Drive, Bluetooth, or email.
+
+---
+
+## Testing on Android Tablet (with ESP32 SoftAP)
+
+When deploying to a standalone tablet, the ESP32 acts as a **SoftAP (Wi-Fi Access Point)**, creating its own local Wi-Fi network that the tablet connects to directly. No external router or internet connection is required.
+
+### 1. Network Topology (SoftAP Mode)
+
+```
++------------------------------------+          +-----------------------------------------+
+| ESP32 Board (SoftAP Host)          |          | Android Tablet (Client & TCP Server)    |
+|   - SoftAP SSID: e.g. "EMG32_AP"   |  Wi-Fi   |   - Connects to "EMG32_AP"              |
+|   - SoftAP IP (Gateway):192.168.4.1|<-------->|   - Tablet Assigned IP: 192.168.4.2     |
+|   - Runs TCP Client                |          |   - Runs Unity Game (BciServer on 5005) |
+|   - Connects to 192.168.4.2:5005   |          |   - Logs saved to app internal storage  |
++------------------------------------+          +-----------------------------------------+
+```
+
+1. **ESP32 SoftAP IP:** `192.168.4.1` (default ESP-IDF SoftAP gateway).
+2. **ESP32 DHCP Server:** Automatically assigns `192.168.4.2` to the first connected device (the tablet).
+3. **ESP32 Firmware Target IP:** In the ESP32 firmware (`Config.h` / `NetLink.cpp`), ensure the target server IP is set to `192.168.4.2` and port to `5005`.
+
+---
+
+### 2. Android Wi-Fi Setup — Crucial Step!
+
+> [!IMPORTANT]
+> **Handle Android's "No Internet Access" Check:**
+> Because the ESP32 SoftAP has no internet/cellular uplink, Android will detect that the Wi-Fi has no internet access.
+> - A prompt will appear: *"This network has no internet access. Stay connected?"*
+> - You **MUST** select **"Always connect"** or **"Yes / Stay connected"**.
+> - If you ignore this prompt or if "Switch to Mobile Data" is enabled on the tablet, Android will disconnect from the ESP32 or route socket packets to cellular data, causing the connection to fail.
+> - **Recommendation:** When testing in SoftAP mode, turn off Mobile Data / Cellular on the tablet to prevent Android from bypassing the SoftAP Wi-Fi interface.
+
+---
+
+### 3. Step-by-Step Testing Procedure
+
+#### Step A: Build & Install APK
+1. In Unity Editor, open **File → Build Settings**.
+2. Select **Android** and ensure your main game scenes are included (`SetupScene`, etc.).
+3. Verify in **Project Settings → Player → Other Settings**:
+   - Package Name: `com.featureattention.leafdirectionresponse`
+   - Internet Access: **Require** (already configured, ensures `android.permission.INTERNET`).
+4. Connect the tablet to your PC via USB and click **Build and Run** (or build the `.apk` file and install via `adb install -r leaf_game.apk`).
+
+#### Step B: Connect Tablet to ESP32 Wi-Fi
+1. Power on the ESP32 board in SoftAP mode.
+2. On the tablet, open **Settings → Wi-Fi**.
+3. Select your ESP32 Wi-Fi network (e.g. `EMG32_AP`). Enter the password if configured.
+4. When Android warns that the network has no internet access, tap **Keep Connected**.
+
+#### Step C: Launch the Game & Check Calibration
+1. Launch **Leaf Game** on the tablet.
+2. In the setup screen:
+   - Set **NF Source Type** to **`BciCore`**.
+   - Fill in subject ID and block parameters.
+   - Tap **Apply & Continue**.
+3. Unity enters the **Calibration Screen** and starts `BciServer` listening on port `5005`.
+4. **Check the Title Bar:**
+   - The top-right shows: `◌ Listening on <Tablet_IP>:5005…` (e.g., `192.168.4.2:5005`).
+   - Confirm that `<Tablet_IP>` matches what the ESP32 is attempting to connect to.
+5. If the ESP32 was already powered on, it will connect immediately. The indicator switches to:
+   - `● Connected (192.168.4.1:...)` in bright green.
+6. Check telemetry and plots:
+   - **Frames / Sec:** should read ~250 SPS.
+   - **Drops / Gaps:** should remain 0.
+   - **Multi-Channel Raw Tab:** Channels 9 to 16 are visible by default. Waveforms sweep smoothly.
+   - **FFT Spectrum Tab:** Real-time power spectrum updates continuously (~12.5 Hz).
+
+#### Step D: Run the Experiment
+1. When satisfied with signal quality and electrode contacts, tap **Proceed to Game**.
+2. Calibration UI closes, background raw event processing is disabled to save CPU/battery, and the game enters the Instruction / Trial loop.
+3. Neurofeedback is fed in-process directly to the leaf animation.
+
+#### Step E: Collect Logs
+1. After the session finishes, connect the tablet to your PC via USB.
+2. Pull or copy the folder from:
+   `/storage/emulated/0/Android/data/com.featureattention.leafdirectionresponse/files/BciCoreLogs/eeg_<timestamp>/`
 
 ---
 
@@ -303,13 +427,16 @@ string currentRunFolder = BciServer.CurrentSessionDir;
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Status stays "Listening…" | ESP32 not connecting | Check ESP32 WiFi; confirm PC IP:5005 reachable |
-| `SocketException (10048)` | Port 5005 in use | Kill `eeg_tcp_server.py`; check other listeners |
-| Waveforms absent | CalibrationMode not entered | Confirm `nfSourceType = BciCore` in Inspector |
-| NF bar does not move | NF frames not arriving | Confirm firmware sends type `0x05`; check WireFps |
-| `BciCore` not found | Package not registered | Check `Packages/manifest.json` has `file:org.iisc.bcicore.server` |
-| `unsafe` compile error | asmdef mismatch | Confirm `BciCore.asmdef` has `"allowUnsafeCode": true` |
-| CSV files empty | Log directory not writable | Pass explicit `logDir` to `StartServer()` |
+| Status stays "Listening on 192.168.4.2:5005…" | ESP32 not connecting | 1. Confirm ESP32 firmware target IP is `192.168.4.2`.<br>2. Confirm tablet Wi-Fi is connected to ESP32 SoftAP.<br>3. Check if Android switched to cellular data (turn off Mobile Data). |
+| Android drops ESP32 Wi-Fi after a few seconds | Android "no internet" watchdog | Tap the Wi-Fi notification on the tablet and choose **"Stay connected"** / **"Don't ask again"**. |
+| Tablet IP is different (e.g., `192.168.4.3`) | Another device connected to AP first | Look at the IP displayed on the Calibration screen title bar. If it's `192.168.4.3`, reconnect the tablet first or update ESP32 target IP. |
+| Cannot see `Android/data` folder on tablet | Android 11+ scoped storage | Connect tablet to PC via USB and view in Windows File Explorer (MTP mode has no restriction), or use `adb pull`. |
+| `SocketException (10048)` | Port 5005 in use | Kill background instance or check other listeners. |
+| Waveforms absent | CalibrationMode not entered | Confirm `NF Source Type = BciCore` in setup screen. |
+| NF bar does not move | NF frames not arriving | Confirm firmware sends type `0x05`; check WireFps. |
+| `BciCore` not found | Package not registered | Check `Packages/manifest.json` has `file:org.iisc.bcicore.server`. |
+| `unsafe` compile error | asmdef mismatch | Confirm `BciCore.asmdef` has `"allowUnsafeCode": true`. |
+| CSV files empty | Log directory not writable | Logs write to `persistentDataPath` automatically on Android. |
 
 ---
 

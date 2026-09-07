@@ -30,9 +30,13 @@ namespace LeafGame
         {
             lock (_gate)
             {
+                bool isFirst = _seq < 0;
                 _smi0 = s.Smi14gt18Shaped;
                 _smi1 = s.Smi18gt14Shaped;
                 _seq++;
+                if (isFirst)
+                    UnityEngine.Debug.Log(
+                        $"[BciCore] First NF frame received — smi0(14>18_shaped)={_smi0:F4}, smi1(18>14_shaped)={_smi1:F4}. NF polling is active.");
             }
         }
 

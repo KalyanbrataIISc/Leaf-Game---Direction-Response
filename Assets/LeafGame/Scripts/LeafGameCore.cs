@@ -136,7 +136,12 @@ namespace LeafGame
         }
     }
 
-    public sealed class TriggerSender : IDisposable
+    public interface ITriggerSender : IDisposable
+    {
+        void Send(string name, int value);
+    }
+
+    public sealed class TriggerSender : ITriggerSender
     {
         readonly string host; readonly int port;
         public TriggerSender(string host, int port) { this.host=host; this.port=port; }

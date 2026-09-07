@@ -27,6 +27,7 @@ namespace BciCore
         public static BciConfig        Config          { get; private set; }
         public static ConnectionState  State           { get; private set; } = ConnectionState.Disconnected;
         public static bool             CalibrationMode { get; private set; }
+        public static bool             IsUsingProcessedSignals { get; internal set; }
 
         // ── Shared ring buffer (accessed by CalibrationScreen) ────────────────
         public static ChannelRingBuffer RingBuffer { get; private set; }
@@ -46,6 +47,24 @@ namespace BciCore
         // Running stat counters carried across HEALTH frames (for logger)
         static long _pcGaps;
         static long _srvBad;
+
+        // ── Direct logger helpers (called from background process thread) ───
+        internal static void LogRaw(uint seq, int[] counts, ushort marker) => _logger?.WriteRaw(seq, counts, marker);
+        internal static void LogProc(uint seq, float[] uv, ushort marker) => _logger?.WriteSignals(seq, uv, marker);
+
+        /// <summary>
+        /// Log a software-side trigger-sent event to health.csv immediately at the moment
+        /// the trigger is dispatched — independent of firmware echo-back or marker latching.
+        /// Safe to call from the main thread; the LogQueue handles async I/O.
+        /// </summary>
+        public static void LogTriggerSent(string name, int code)
+        {
+            _logger?.WriteHealth(
+                new HealthFrame { Seq = 0, Marker = (ushort)(code & 0xFFFF) },
+                _pcGaps, _srvBad,
+                $"trigger_sent:{name}");
+            Debug.Log($"[BciCore] Trigger sent → '{name}' = {code}");
+        }
 
         // ── Public Events (main thread) ───────────────────────────────────────
 
@@ -145,6 +164,12 @@ namespace BciCore
             return _listener.SendMarker((ushort)(code & 0xFFFF));
         }
 
+        /// <summary>
+        /// Returns true if the board is currently streaming NF frames.
+        /// Useful for diagnosing silent NF stalls in BciCore mode.
+        /// </summary>
+        public static bool IsReceivingNf => _listener?.IsReceivingNf ?? false;
+
         /// <summary>Stop listening and release all resources.</summary>
         public static void StopServer()
         {
@@ -152,6 +177,7 @@ namespace BciCore
             _listener = null;
             _logger?.Dispose();
             _logger = null;
+            IsUsingProcessedSignals = false;
             State = ConnectionState.Disconnected;
             Debug.Log("[BciCore] Server stopped.");
         }
@@ -178,16 +204,10 @@ namespace BciCore
             => OnRawFrame?.Invoke(uv, marker, seq);
 
         static void InternalOnRawCounts(int[] counts, ushort marker, uint seq)
-        {
-            _logger?.WriteRaw(seq, counts, marker);
-            OnRawCounts?.Invoke(counts, marker, seq);
-        }
+            => OnRawCounts?.Invoke(counts, marker, seq);
 
         static void InternalOnProcFrame(float[] uv, ushort marker, uint seq)
-        {
-            _logger?.WriteSignals(seq, uv, marker);
-            OnProcFrame?.Invoke(uv, marker, seq);
-        }
+            => OnProcFrame?.Invoke(uv, marker, seq);
 
         static void InternalOnAlpha(AlphaFrame af)
         {

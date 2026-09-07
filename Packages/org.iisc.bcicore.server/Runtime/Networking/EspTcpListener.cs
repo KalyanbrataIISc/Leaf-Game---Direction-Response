@@ -54,6 +54,12 @@ namespace BciCore
         BciConfig _cfg = new BciConfig { Fs = 250, NumCh = 32, UvPerCount = 0.02235174f };
         int       _analysisCh = 8;
 
+        // Last time an NF frame was received (UnityElapsed seconds) — for IsReceivingNf
+        volatile double _lastNfSec = -1.0;
+
+        /// <summary>True if an NF frame has arrived within the last 2 s.</summary>
+        public bool IsReceivingNf => (_lastNfSec > 0) && ((UnityElapsed() - _lastNfSec) < 2.0);
+
         // ── Start / Stop ──────────────────────────────────────────────────────
 
         public void StartListening(int port)
@@ -85,20 +91,35 @@ namespace BciCore
             NotifyState(ConnectionState.Listening);
             while (!_disposed)
             {
-                TcpClient client;
+                TcpClient client = null;
                 try
                 {
                     client = _listener.AcceptTcpClient();
                 }
                 catch (Exception e)
                 {
-                    if (!_disposed)
-                        Debug.LogWarning($"[BciCore] Accept error: {e.Message}");
-                    break;
+                    if (_disposed) break;
+                    Debug.LogWarning($"[BciCore] Accept error or network reset: {e.Message}. Re-binding listener in 1s...");
+                    Thread.Sleep(1000);
+                    try { _listener?.Stop(); } catch { }
+                    try
+                    {
+                        _listener = new TcpListener(IPAddress.Any, port);
+                        _listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                        _listener.Start(backlog: 5);
+                        NotifyState(ConnectionState.Listening);
+                    }
+                    catch (Exception restartEx)
+                    {
+                        Debug.LogWarning($"[BciCore] Re-bind failed: {restartEx.Message}");
+                    }
+                    continue;
                 }
 
+                if (client == null) continue;
+
                 client.NoDelay = true;
-                client.ReceiveTimeout = (int)(RecvTimeoutSec * 1000);
+                client.ReceiveTimeout = 2000;
                 client.SendTimeout    = 1000;
                 try
                 {
@@ -112,8 +133,9 @@ namespace BciCore
 
                 HandleClient(client);
 
+                _client = null;
                 NotifyState(ConnectionState.Listening);
-                Debug.Log("[BciCore] Waiting for ESP32 to reconnect...");
+                Debug.Log("[BciCore] ESP32 disconnected. Waiting for reconnect...");
             }
             NotifyState(ConnectionState.Disconnected);
         }
@@ -124,6 +146,7 @@ namespace BciCore
         {
             using (client)
             {
+                Socket socket = client.Client;
                 var stream = client.GetStream();
                 _stream = stream;
 
@@ -134,7 +157,7 @@ namespace BciCore
                 // ── Receive thread ────────────────────────────────────────────
                 var recvThread = new Thread(() =>
                 {
-                    try   { RecvLoop(stream, frameQ); }
+                    try   { RecvLoop(socket, frameQ); }
                     catch { }
                     finally
                     {
@@ -153,10 +176,10 @@ namespace BciCore
 
         // ── Receive thread: only reads bytes, never processes ─────────────────
 
-        void RecvLoop(NetworkStream stream, BlockingCollection<(FrameType, uint, byte[])> q)
+        void RecvLoop(Socket socket, BlockingCollection<(FrameType, uint, byte[])> q)
         {
             // Resync to first 0xAA 0x55
-            if (!ResyncMagic(stream)) return;
+            if (!ResyncMagic(socket)) return;
 
             bool firstFrame = true;
             var  hdrBuf     = new byte[FrameProtocol.HeaderSize];
@@ -168,15 +191,15 @@ namespace BciCore
                 {
                     hdrBuf[0] = FrameProtocol.Magic0;
                     hdrBuf[1] = FrameProtocol.Magic1;
-                    if (!ReadExact(stream, hdrBuf, 2, FrameProtocol.HeaderSize - 2)) return;
+                    if (!ReadExact(socket, hdrBuf, 2, FrameProtocol.HeaderSize - 2)) return;
                     firstFrame = false;
                 }
                 else
                 {
-                    if (!ReadExact(stream, hdrBuf, 0, FrameProtocol.HeaderSize)) return;
+                    if (!ReadExact(socket, hdrBuf, 0, FrameProtocol.HeaderSize)) return;
                     if (hdrBuf[0] != FrameProtocol.Magic0 || hdrBuf[1] != FrameProtocol.Magic1)
                     {
-                        if (!ResyncMagic(stream)) return;
+                        if (!ResyncMagic(socket)) return;
                         firstFrame = true;
                         continue;
                     }
@@ -186,7 +209,7 @@ namespace BciCore
                     continue;
 
                 byte[] payload = new byte[plen];
-                if (plen > 0 && !ReadExact(stream, payload, 0, plen)) return;
+                if (plen > 0 && !ReadExact(socket, payload, 0, plen)) return;
 
                 try { q.Add((ftype, seq, payload)); }
                 catch (InvalidOperationException) { return; }   // queue completed
@@ -205,6 +228,7 @@ namespace BciCore
             uint?  lastSampleSeq  = null;
             uint?  curSampleSeq   = null;
             double lastPerfSec    = UnityElapsed();
+            double lastRawSec     = -1.0;
 
             // Health state (updated from HEALTH frames)
             uint hBoardDrops = 0, hFreeHeap = 0, hBoardBad = 0, hBoardMiss = 0, hBoardDspMax = 0;
@@ -259,8 +283,13 @@ namespace BciCore
                         var counts = FrameProtocol.ParseRawCounts(payload, nch, out ushort rawMarker);
                         if (counts != null)
                         {
+                            lastRawSec = UnityElapsed();
+                            BciServer.IsUsingProcessedSignals = false;
+
+                            BciServer.LogRaw(seq, counts, rawMarker);
+
                             // Convert to µV and push to ring buffer
-                            float uvpc = _cfg.UvPerCount;
+                            float uvpc = _cfg.UvPerCount > 0 ? _cfg.UvPerCount : 0.02235174f;
                             var uv = new float[nch];
                             for (int i = 0; i < nch; i++) uv[i] = counts[i] * uvpc;
                             BciServer.RingBuffer?.Write(uv);
@@ -284,6 +313,17 @@ namespace BciCore
                         var proc = FrameProtocol.ParseProcUv(payload, nch, out ushort procMarker);
                         if (proc != null)
                         {
+                            BciServer.LogProc(seq, proc, procMarker);
+
+                            // If raw frames are not active (either not received yet or none in last 0.5s),
+                            // route processed frames to RingBuffer so waveforms and FFT plot live.
+                            bool rawActive = (lastRawSec > 0 && (UnityElapsed() - lastRawSec) < 0.5);
+                            if (!rawActive)
+                            {
+                                BciServer.RingBuffer?.Write(proc);
+                                BciServer.IsUsingProcessedSignals = true;
+                            }
+
                             if (BciServer.CalibrationMode)
                             {
                                 var procCopy = proc; uint seqCopy = seq; ushort mkCopy = procMarker;
@@ -318,6 +358,7 @@ namespace BciCore
                         if (plen == 12 || plen == 14 || plen == 22)
                         {
                             var nf = FrameProtocol.ParseNf(payload, seq);
+                            _lastNfSec = UnityElapsed();
                             MainThreadDispatcher.Enqueue(() => OnNfSample?.Invoke(nf));
                         }
                         else { badFrames++; }
@@ -415,28 +456,50 @@ namespace BciCore
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        static bool ReadExact(NetworkStream stream, byte[] buf, int offset, int count)
+        static bool ReadExact(Socket socket, byte[] buf, int offset, int count, int timeoutMs = 2000)
         {
             int read = 0;
             while (read < count)
             {
-                int n;
-                try { n = stream.Read(buf, offset + read, count - read); }
-                catch { return false; }
-                if (n <= 0) return false;
-                read += n;
+                try
+                {
+                    if (!socket.Poll(timeoutMs * 1000, SelectMode.SelectRead))
+                        return false; // Timed out waiting for data
+                    if (socket.Available == 0)
+                        return false; // Remote closed gracefully (EOF)
+
+                    int n = socket.Receive(buf, offset + read, count - read, SocketFlags.None);
+                    if (n <= 0) return false;
+                    read += n;
+                }
+                catch
+                {
+                    return false;
+                }
             }
             return true;
         }
 
-        static bool ResyncMagic(NetworkStream stream)
+        static bool ResyncMagic(Socket socket, int timeoutMs = 2000)
         {
             byte prev = 0;
             var  buf  = new byte[1];
             for (int i = 0; i < 65536; i++)   // give up after 64 KB of garbage
             {
-                try { if (stream.Read(buf, 0, 1) <= 0) return false; }
-                catch { return false; }
+                try
+                {
+                    if (!socket.Poll(timeoutMs * 1000, SelectMode.SelectRead))
+                        return false;
+                    if (socket.Available == 0)
+                        return false;
+
+                    int n = socket.Receive(buf, 0, 1, SocketFlags.None);
+                    if (n <= 0) return false;
+                }
+                catch
+                {
+                    return false;
+                }
                 if (prev == FrameProtocol.Magic0 && buf[0] == FrameProtocol.Magic1) return true;
                 prev = buf[0];
             }

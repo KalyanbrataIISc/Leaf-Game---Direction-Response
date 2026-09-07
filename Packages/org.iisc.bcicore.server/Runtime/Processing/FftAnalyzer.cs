@@ -73,16 +73,14 @@ namespace BciCore
                 return new float[1];
             }
 
-            int n = NextPowerOfTwo(count);
+            int len = Math.Min(count, samples.Length);
+            int n = NextPowerOfTwo(len);
             var re = new double[n];
             var im = new double[n];
 
-            int start = Math.Max(0, samples.Length - count);
-            int len = Math.Min(count, samples.Length - start);
-
-            // 1. Mean subtraction
+            // 1. Mean subtraction over the valid len samples
             double sumX = 0;
-            for (int i = 0; i < len; i++) sumX += samples[start + i];
+            for (int i = 0; i < len; i++) sumX += samples[i];
             double meanX = sumX / len;
 
             // 2. Linear detrend: polyfit(t, seg, 1) -> y = slope * t + intercept
@@ -93,7 +91,7 @@ namespace BciCore
             for (int i = 0; i < len; i++)
             {
                 double dt = i - meanT;
-                double dx = samples[start + i] - meanX;
+                double dx = samples[i] - meanX;
                 covTX += dt * dx;
             }
 
@@ -102,7 +100,7 @@ namespace BciCore
 
             for (int i = 0; i < len; i++)
             {
-                re[i] = samples[start + i] - (intercept + slope * i);
+                re[i] = samples[i] - (intercept + slope * i);
             }
 
             // Zero-pad to next power of two

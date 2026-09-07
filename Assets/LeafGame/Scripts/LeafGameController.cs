@@ -178,7 +178,7 @@ namespace LeafGame
 
         AppState state=AppState.Setup;
         LeafVisualRenderer visuals;
-        TriggerSender triggers;
+        ITriggerSender triggers;
         INfReader nfReader;
         CsvLogger logger;
         System.Random rng;
@@ -253,10 +253,10 @@ namespace LeafGame
             triggers?.Dispose();
             if(nfSourceType==NfSourceType.BciCore)
             {
-                // BciCore: start the in-process TCP server and send reset marker in-process.
+                // BciCore: start the in-process TCP server and wire BciCoreTriggerSender (TCP + UDP fallback).
                 BciServer.StartServer();
-                triggers=new TriggerSender(nfTcpHost.Trim(),triggerPort); // keep UDP path alive as fallback
-                BciServer.SendMarker(resetTrigger);
+                triggers=new BciCoreTriggerSender(nfTcpHost.Trim(),triggerPort);
+                triggers.Send("reset",resetTrigger);
             }
             else
             {
@@ -361,6 +361,11 @@ namespace LeafGame
                             if(_calibScreen!=null){Destroy(_calibScreen);_calibScreen=null;}
                             BeginSession();
                         };
+                        _calibScreen.OnBackPressed=()=>{
+                            if(_calibScreen!=null){Destroy(_calibScreen);_calibScreen=null;}
+                            BciServer.ExitCalibrationMode();
+                            state=AppState.Setup;
+                        };
                     }
                 }
                 else
@@ -400,6 +405,9 @@ namespace LeafGame
                     // directly from BciServer.OnNfSample — no TCP connection needed here.
                     nfReader=new BciCoreNfReader();
                     nfConnectionStatus="Receiving neurofeedback in-process (BciCore)";
+                    // Initialise the stall clock so the warning doesn't fire immediately
+                    // (mirrors what WaitForTcpAndCompleteSession does for Tcp mode).
+                    nfLastFreshClock=MonotonicClock.Now;
                     CompleteSessionStart();
                 }
                 else
@@ -556,10 +564,11 @@ namespace LeafGame
             trialFrame++;bool preCue=trialFrame<cueOnsetFrame;
             bool readOk=nfReader.TryRead(trial.NfIndex,out double fresh);
             if(readOk){nfCurrent=fresh;nfLastFreshClock=MonotonicClock.Now;}
-            else if(nfSourceType==NfSourceType.Tcp&&!nfStallWarned&&nfStreamStallWarnSec>0&&MonotonicClock.Now-nfLastFreshClock>=nfStreamStallWarnSec)
+            else if((nfSourceType==NfSourceType.Tcp||nfSourceType==NfSourceType.BciCore)&&!nfStallWarned&&nfStreamStallWarnSec>0&&MonotonicClock.Now-nfLastFreshClock>=nfStreamStallWarnSec)
             {
                 nfStallWarned=true;
-                Debug.LogWarning($"No fresh NF sample for {MonotonicClock.Now-nfLastFreshClock:F1} s during trial {trialIndex+1}. Source: {NfDescription}. The trial will continue using the last value.");
+                string extra=nfSourceType==NfSourceType.BciCore?" Board may not be sending NF frames (check firmware/DSP pipeline).":"";
+                Debug.LogWarning($"No fresh NF sample for {MonotonicClock.Now-nfLastFreshClock:F1} s during trial {trialIndex+1}. Source: {NfDescription}.{extra} The trial will continue using the last value.");
             }
             double clipped=Math.Max(-NfClip,Math.Min(NfClip,nfCurrent));
             if(!preCue)nfLevel=Math.Max(0,Math.Min(1,nfLevel+NfRatePerUnitPerSec*ifi*clipped));

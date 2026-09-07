@@ -54,11 +54,26 @@ namespace BciCore
         BciConfig _cfg = new BciConfig { Fs = 250, NumCh = 32, UvPerCount = 0.02235174f };
         int       _analysisCh = 8;
 
-        // Last time an NF frame was received (UnityElapsed seconds) — for IsReceivingNf
-        volatile double _lastNfSec = -1.0;
+        // Last time an NF frame was received (UnityElapsed seconds) — for IsReceivingNf.
+        // Stored as long (IEEE-754 bit pattern) so we can use Interlocked for thread safety
+        // (volatile double is illegal in C#).
+        long _lastNfSecBits = -1L;   // -1 means "never received"
+
+        double LastNfSec
+        {
+            get => System.BitConverter.Int64BitsToDouble(System.Threading.Interlocked.Read(ref _lastNfSecBits));
+            set => System.Threading.Interlocked.Exchange(ref _lastNfSecBits, System.BitConverter.DoubleToInt64Bits(value));
+        }
 
         /// <summary>True if an NF frame has arrived within the last 2 s.</summary>
-        public bool IsReceivingNf => (_lastNfSec > 0) && ((UnityElapsed() - _lastNfSec) < 2.0);
+        public bool IsReceivingNf
+        {
+            get
+            {
+                double t = LastNfSec;
+                return t >= 0 && (UnityElapsed() - t) < 2.0;
+            }
+        }
 
         // ── Start / Stop ──────────────────────────────────────────────────────
 
@@ -358,7 +373,7 @@ namespace BciCore
                         if (plen == 12 || plen == 14 || plen == 22)
                         {
                             var nf = FrameProtocol.ParseNf(payload, seq);
-                            _lastNfSec = UnityElapsed();
+                            LastNfSec = UnityElapsed();
                             MainThreadDispatcher.Enqueue(() => OnNfSample?.Invoke(nf));
                         }
                         else { badFrames++; }

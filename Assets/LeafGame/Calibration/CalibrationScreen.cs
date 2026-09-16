@@ -36,7 +36,7 @@ namespace LeafGame
         [Header("Display")]
         [SerializeField] float fftUpdateIntervalSec = 0.08f;    // ~12.5 Hz (matches PyQt refresh)
         [SerializeField] int   fftWindowSamples     = 500;      // 500 samples (2 s at 250 SPS, matches FFT_NPTS in bci_gui_v2.py)
-        [SerializeField] int   rawWindowSamples     = 1250;     // 5 s at 250 SPS
+        [SerializeField] float rawTimeSpanSec       = 5f;       // Initial raw view width in seconds
         [SerializeField] float defaultYRangeUv      = 200f;
 
         // ── Tab state ─────────────────────────────────────────────────────────
@@ -52,6 +52,7 @@ namespace LeafGame
         bool  _removeDc    = true;
         bool  _autoscaleY  = true;
         float _fixedYRange = 200f;
+        string _rawTimeSpanInput;
 
         // ── FFT state (Real-Time FFT matching bci_gui_v2.py) ──────────────────
         float     _fftTimer;
@@ -103,10 +104,12 @@ namespace LeafGame
         void OnEnable()
         {
             _fixedYRange  = defaultYRangeUv;
+            rawTimeSpanSec = Mathf.Clamp(rawTimeSpanSec, 0.1f, ChannelRingBuffer.HistorySeconds);
+            _rawTimeSpanInput = rawTimeSpanSec.ToString("0.##");
             _numCh        = BciServer.Config.NumCh > 0 ? BciServer.Config.NumCh : 32;
             _rawChEnabled = new bool[_numCh];
             _fftChEnabled = new bool[_numCh];
-            _sampleBuf    = new float[rawWindowSamples];
+            _sampleBuf    = new float[Mathf.Max(fftWindowSamples, BciServer.RingBuffer?.Capacity ?? ChannelRingBuffer.CapacityForRate(250))];
             _fftPower     = new float[_numCh][];
 
             _cachedIp     = GetLocalIpAddress();
@@ -336,7 +339,7 @@ namespace LeafGame
         void DrawRawTab(Rect r, float s)
         {
             // Top options row
-            float optH = Mathf.Round(30f * s);
+            float optH = Mathf.Round(60f * s);
             Rect optR = new Rect(r.x + 6 * s, r.y + 4 * s, r.width - 12 * s, optH);
 
             _removeDc   = GUI.Toggle(new Rect(optR.x, optR.y + 2 * s, 180 * s, 24 * s), _removeDc, " Remove DC (Centred)", _bodyStyle);
@@ -348,6 +351,13 @@ namespace LeafGame
                 string rangeStr = GUI.TextField(new Rect(optR.x + 425 * s, optR.y + 2 * s, 70 * s, 24 * s), _fixedYRange.ToString("F0"), _bodyStyle);
                 if (float.TryParse(rangeStr, out float parsed) && parsed > 0) _fixedYRange = parsed;
             }
+
+            GUI.Label(new Rect(optR.x, optR.y + 32 * s, 115 * s, 24 * s), "Time span (s):", _bodyStyle);
+            _rawTimeSpanInput = GUI.TextField(new Rect(optR.x + 120 * s, optR.y + 32 * s, 70 * s, 24 * s), _rawTimeSpanInput, 6);
+            if (float.TryParse(_rawTimeSpanInput, out float enteredSpan) &&
+                enteredSpan >= 0.1f && enteredSpan <= ChannelRingBuffer.HistorySeconds)
+                rawTimeSpanSec = enteredSpan;
+            GUI.Label(new Rect(optR.x + 198 * s, optR.y + 32 * s, 125 * s, 24 * s), "0.1 to 10 s", _labelStyle);
 
             // Bottom channel selector
             float selH = Mathf.Round(88f * s);
@@ -362,25 +372,34 @@ namespace LeafGame
 
         void DrawWaveformGrid(Rect r, float s)
         {
+            float axisH = Mathf.Round(32f * s);
+            Rect waveR = new Rect(r.x, r.y, r.width, Mathf.Max(1f, r.height - axisH));
+            float fs = BciServer.Config.Fs > 0 ? BciServer.Config.Fs : 250f;
+            var ring = BciServer.RingBuffer;
+            int capacity = ring?.Capacity ?? ChannelRingBuffer.CapacityForRate(250);
+            if (_sampleBuf.Length < Mathf.Max(fftWindowSamples, capacity))
+                _sampleBuf = new float[Mathf.Max(fftWindowSamples, capacity)];
+            int sampleCount = Mathf.Min(capacity, Mathf.CeilToInt(rawTimeSpanSec * fs) + 1);
+
             int visible = 0;
             for (int c = 0; c < _numCh; c++) if (_rawChEnabled[c]) visible++;
 
             if (visible == 0)
             {
                 GUI.color = new Color(0.08f, 0.10f, 0.15f);
-                GUI.DrawTexture(r, Texture2D.whiteTexture);
+                GUI.DrawTexture(waveR, Texture2D.whiteTexture);
                 GUI.color = Color.white;
                 GUI.Label(new Rect(r.x + 20 * s, r.y + 20 * s, 450 * s, 30 * s), "No channels selected. Please select channels below.", _bodyStyle);
                 return;
             }
 
             // If 8 or fewer channels are selected, perfectly fit without scrollbar
-            float ph = (visible <= 8) ? (r.height / visible) : Mathf.Max(60f * s, r.height / 8f);
+            float ph = (visible <= 8) ? (waveR.height / visible) : Mathf.Max(60f * s, waveR.height / 8f);
             float totalH = ph * visible;
 
             // Scroll view
-            Rect viewRect = new Rect(0, 0, r.width - (totalH > r.height ? 20 * s : 0), totalH);
-            _plotScroll = GUI.BeginScrollView(r, _plotScroll, viewRect);
+            Rect viewRect = new Rect(0, 0, waveR.width - (totalH > waveR.height ? 20 * s : 0), totalH);
+            _plotScroll = GUI.BeginScrollView(waveR, _plotScroll, viewRect);
 
             int idx = 0;
             for (int c = 0; c < _numCh; c++)
@@ -407,23 +426,33 @@ namespace LeafGame
             CreateLineMaterial().SetPass(0);
             GL.Begin(GL.LINES);
 
+            float plotX = waveR.x - _plotScroll.x + 2;
+            float plotW = viewRect.width - 4;
+            for (int tick = 0; tick <= 4; tick++)
+            {
+                float x = plotX + plotW * tick / 4f;
+                GL.Color(new Color(0.18f, 0.24f, 0.34f, 0.45f));
+                GL.Vertex3(x, waveR.y, 0);
+                GL.Vertex3(x, waveR.yMax, 0);
+            }
+
             idx = 0;
             for (int c = 0; c < _numCh; c++)
             {
                 if (!_rawChEnabled[c]) continue;
 
-                float screenX = r.x - _plotScroll.x;
-                float screenY = r.y + idx * ph - _plotScroll.y;
+                float screenX = waveR.x - _plotScroll.x;
+                float screenY = waveR.y + idx * ph - _plotScroll.y;
                 float screenW = viewRect.width;
                 float screenH = ph - 2;
                 idx++;
 
                 // Skip if completely scrolled outside of plots area
-                if (screenY + screenH < r.y || screenY > r.yMax) continue;
+                if (screenY + screenH < waveR.y || screenY > waveR.yMax) continue;
 
                 // Center zero line
                 float cy = screenY + screenH * 0.5f;
-                if (cy >= r.y && cy <= r.yMax)
+                if (cy >= waveR.y && cy <= waveR.yMax)
                 {
                     GL.Color(new Color(0.18f, 0.24f, 0.34f, 0.6f));
                     GL.Vertex3(screenX, cy, 0);
@@ -432,7 +461,7 @@ namespace LeafGame
 
                 // Row bottom border
                 float by = screenY + screenH;
-                if (by >= r.y && by <= r.yMax)
+                if (by >= waveR.y && by <= waveR.yMax)
                 {
                     GL.Color(new Color(0.14f, 0.18f, 0.28f, 0.8f));
                     GL.Vertex3(screenX, by, 0);
@@ -440,7 +469,7 @@ namespace LeafGame
                 }
 
                 // Waveform data
-                int n = BciServer.RingBuffer?.ReadRecent(c, _sampleBuf, rawWindowSamples) ?? 0;
+                int n = ring?.ReadRecent(c, _sampleBuf, sampleCount) ?? 0;
                 if (n < 2) continue;
 
                 float yRange = _autoscaleY ? ComputeRange(_sampleBuf, n) : _fixedYRange;
@@ -448,33 +477,79 @@ namespace LeafGame
                 float mean = _removeDc ? ComputeMean(_sampleBuf, n) : 0f;
 
                 GL.Color(ChColor(c));
-                float px0 = screenX + 2;
-                float v0  = _sampleBuf[0] - mean;
-                float py0 = cy - (v0 / yRange) * (screenH * 0.44f);
-                py0 = Mathf.Clamp(py0, Mathf.Max(screenY + 1, r.y), Mathf.Min(screenY + screenH - 1, r.yMax));
-
-                for (int i = 1; i < n; i++)
+                int samplesPerColumn = Mathf.Max(1, Mathf.CeilToInt(n / Mathf.Max(1f, plotW)));
+                if (samplesPerColumn > 1)
                 {
-                    float px = screenX + 2 + (float)i / (n - 1) * (screenW - 4);
-                    float v  = _sampleBuf[i] - mean;
-                    float py = cy - (v / yRange) * (screenH * 0.44f);
-                    py = Mathf.Clamp(py, Mathf.Max(screenY + 1, r.y), Mathf.Min(screenY + screenH - 1, r.yMax));
-
-                    GL.Vertex3(px0, py0, 0);
-                    GL.Vertex3(px,  py,  0);
-                    if (s >= 1.25f)
+                    // Preserve spikes while limiting the GL work to roughly one line per pixel.
+                    float previousX = 0f, previousY = 0f;
+                    bool hasPrevious = false;
+                    for (int start = 0; start < n; start += samplesPerColumn)
                     {
-                        GL.Vertex3(px0, py0 + 1f, 0);
-                        GL.Vertex3(px,  py  + 1f, 0);
+                        int end = Mathf.Min(n, start + samplesPerColumn);
+                        float min = _sampleBuf[start], max = min;
+                        for (int i = start + 1; i < end; i++)
+                        {
+                            min = Mathf.Min(min, _sampleBuf[i]);
+                            max = Mathf.Max(max, _sampleBuf[i]);
+                        }
+                        float ageSamples = n - 1 - (start + end - 1) * 0.5f;
+                        float px = plotX + plotW - ageSamples / fs / rawTimeSpanSec * plotW;
+                        float top = Mathf.Clamp(cy - ((max - mean) / yRange) * (screenH * 0.44f),
+                            Mathf.Max(screenY + 1, waveR.y), Mathf.Min(screenY + screenH - 1, waveR.yMax));
+                        float bottom = Mathf.Clamp(cy - ((min - mean) / yRange) * (screenH * 0.44f),
+                            Mathf.Max(screenY + 1, waveR.y), Mathf.Min(screenY + screenH - 1, waveR.yMax));
+                        GL.Vertex3(px, top, 0);
+                        GL.Vertex3(px, bottom, 0);
+                        float centerY = (top + bottom) * 0.5f;
+                        if (hasPrevious)
+                        {
+                            GL.Vertex3(previousX, previousY, 0);
+                            GL.Vertex3(px, centerY, 0);
+                        }
+                        previousX = px;
+                        previousY = centerY;
+                        hasPrevious = true;
                     }
+                }
+                else
+                {
+                    // The newest sample sits at 0 s; older samples retain their real time spacing.
+                    float px0 = plotX + plotW - (n - 1) / fs / rawTimeSpanSec * plotW;
+                    float v0  = _sampleBuf[0] - mean;
+                    float py0 = cy - (v0 / yRange) * (screenH * 0.44f);
+                    py0 = Mathf.Clamp(py0, Mathf.Max(screenY + 1, waveR.y), Mathf.Min(screenY + screenH - 1, waveR.yMax));
 
-                    px0 = px;
-                    py0 = py;
+                    for (int i = 1; i < n; i++)
+                    {
+                        float px = plotX + plotW - (n - 1 - i) / fs / rawTimeSpanSec * plotW;
+                        float v  = _sampleBuf[i] - mean;
+                        float py = cy - (v / yRange) * (screenH * 0.44f);
+                        py = Mathf.Clamp(py, Mathf.Max(screenY + 1, waveR.y), Mathf.Min(screenY + screenH - 1, waveR.yMax));
+
+                        GL.Vertex3(px0, py0, 0);
+                        GL.Vertex3(px,  py,  0);
+                        if (s >= 1.25f)
+                        {
+                            GL.Vertex3(px0, py0 + 1f, 0);
+                            GL.Vertex3(px,  py  + 1f, 0);
+                        }
+
+                        px0 = px;
+                        py0 = py;
+                    }
                 }
             }
 
             GL.End();
             GL.PopMatrix();
+
+            for (int tick = 0; tick <= 4; tick++)
+            {
+                float x = plotX + plotW * tick / 4f;
+                float seconds = rawTimeSpanSec * (tick / 4f - 1f);
+                GUI.Label(new Rect(x - 32 * s, waveR.yMax + 2 * s, 64 * s, 18 * s), $"{seconds:F1}", _centerLabelStyle);
+            }
+            GUI.Label(new Rect(waveR.x, waveR.yMax + 17 * s, waveR.width, 16 * s), "Time (s)", _centerLabelStyle);
         }
 
         // ── FFT Spectrum Tab (Real-Time FFT matching bci_gui_v2.py) ──────────

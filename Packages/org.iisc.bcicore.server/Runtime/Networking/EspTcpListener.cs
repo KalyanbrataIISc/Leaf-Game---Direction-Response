@@ -289,7 +289,7 @@ namespace BciCore
                     case FrameType.Hello:
                         _cfg = FrameProtocol.ParseHello(payload);
                         _analysisCh = _cfg.AnalysisCh > 0 ? _cfg.AnalysisCh : 8;
-                        BciServer.RingBuffer?.Resize(_cfg.NumCh);
+                        BciServer.RingBuffer?.Resize(_cfg.NumCh, ChannelRingBuffer.CapacityForRate(_cfg.Fs));
                         var cfgCopy = _cfg;
                         MainThreadDispatcher.Enqueue(() => OnHello?.Invoke(cfgCopy));
                         break;

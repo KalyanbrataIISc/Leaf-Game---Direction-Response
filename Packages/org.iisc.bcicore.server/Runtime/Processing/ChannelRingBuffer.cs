@@ -12,7 +12,11 @@ namespace BciCore
 {
     public sealed class ChannelRingBuffer
     {
-        const int DefaultWindowSamples = 2500;   // 10 s at 250 SPS
+        public const int HistorySeconds = 10;
+        const int DefaultWindowSamples = 250 * HistorySeconds + 1;
+
+        public static int CapacityForRate(int samplesPerSecond)
+            => Math.Max(2, samplesPerSecond * HistorySeconds + 1);
 
         float[][] _data;
         int[]     _head;

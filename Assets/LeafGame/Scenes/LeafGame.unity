@@ -186,8 +186,8 @@ MonoBehaviour:
   NfRatePerUnitPerSec: 3
   NfClip: 1
   NfWhiteTopRelaxation: 0.1
-  frequencyC1Hz: 19
-  frequencyC2Hz: 23
+  frequencyC1Hz: 17
+  frequencyC2Hz: 19
   precomputedPhaseHorizonSec: 300
   phaseHorizonSafetyMarginSec: 2
   ssvepMeanLuminance: 0.5
@@ -221,14 +221,14 @@ MonoBehaviour:
   stimulusWidthFraction: 1
   stimulusHeightFraction: 1
   safeAreaPaddingReferencePx: 0
-  leafSizePx: 100
+  leafSizePx: 150
   leafWidthMultiplier: 0.42
   leafBorderMultiplier: 0.2
   leafSpeedPxPerSec: 200
-  leavesPerFlock: 10
+  leavesPerFlock: 8
   laneClearanceMarginPx: 6
   maxFieldShrinkPx: 400
-  minRepeatsPerAxis: 2
+  minRepeatsPerAxis: 1
   leafArcPoints: 10
   verifyLeafPathsAtSetup: 1
   verificationMaxFrames: 40000

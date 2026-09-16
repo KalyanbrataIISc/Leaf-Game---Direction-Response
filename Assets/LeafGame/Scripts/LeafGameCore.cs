@@ -105,34 +105,34 @@ namespace LeafGame
     {
         public double RefreshHz { get; private set; }
         public double Period => 1.0 / RefreshHz;
-        public int Count => _c1.Length;
-        readonly float[] _c1;
-        readonly float[] _c2;
+        public int Count { get; private set; }
+        readonly double horizonSeconds, mean, amplitude, angular1, angular2, phase1, phase2;
 
         public SsvepPhaseSchedule(double refreshHz, double horizonSeconds, double f1, double f2,
             double meanLuminance, double modulationDepth, double phase1Degrees, double phase2Degrees)
         {
             RefreshHz = Math.Max(1.0, refreshHz);
-            int n = Math.Max(2, (int)Math.Ceiling(Math.Max(0.01, horizonSeconds) * RefreshHz) + 4);
-            _c1 = new float[n]; _c2 = new float[n];
-            double mean = Math.Max(0.0, Math.Min(1.0, meanLuminance));
+            this.horizonSeconds=Math.Max(0.01,horizonSeconds);
+            Count=Math.Max(2,(int)Math.Ceiling(this.horizonSeconds*RefreshHz)+4);
+            mean = Math.Max(0.0, Math.Min(1.0, meanLuminance));
             double depth = Math.Max(0.0, Math.Min(1.0, modulationDepth));
-            double amplitude = Math.Min(mean, 1.0 - mean) * depth;
-            double p1 = phase1Degrees * Math.PI / 180.0;
-            double p2 = phase2Degrees * Math.PI / 180.0;
-            for (int slot=0; slot<n; slot++)
-            {
-                double t = slot / RefreshHz;
-                _c1[slot] = (float)(mean + amplitude * Math.Sin(2.0 * Math.PI * f1 * t + p1));
-                _c2[slot] = (float)(mean + amplitude * Math.Sin(2.0 * Math.PI * f2 * t + p2));
-            }
+            amplitude = Math.Min(mean, 1.0 - mean) * depth;
+            angular1=2.0*Math.PI*f1;angular2=2.0*Math.PI*f2;
+            phase1=phase1Degrees*Math.PI/180.0;phase2=phase2Degrees*Math.PI/180.0;
         }
 
         public bool TrySampleForPresentation(double elapsedSeconds, out int slot, out float c1, out float c2)
         {
-            slot = Math.Max(0, (int)Math.Round(elapsedSeconds * RefreshHz));
-            if (slot >= _c1.Length) { c1=0; c2=0; return false; }
-            c1=_c1[slot]; c2=_c2[slot]; return true;
+            // The slot is only for missed-frame diagnostics. Never quantize the
+            // stimulus phase: elapsedSeconds comes from the previous frame's
+            // measured end time plus one nominal display interval. Unity does
+            // not expose Psychtoolbox's actual VBL timestamp here.
+            double t=Math.Max(0.0,elapsedSeconds);
+            slot=Math.Max(0,(int)Math.Round(t*RefreshHz));
+            if(t>horizonSeconds){c1=0;c2=0;return false;}
+            c1=(float)(mean+amplitude*Math.Sin(angular1*t+phase1));
+            c2=(float)(mean+amplitude*Math.Sin(angular2*t+phase2));
+            return true;
         }
     }
 
@@ -306,13 +306,21 @@ namespace LeafGame
     {
         public int frame; public double vblTime, missedBy;
     }
+    public struct SsvepTraceRow
+    {
+        public int frame, nominalSlot;
+        public double estimatedDisplayTime, frameEndTime, phaseTime;
+        public double frequencyC1Hz, frequencyC2Hz, refreshHz;
+        public float luminanceC1, luminanceC2;
+    }
 
     public sealed class CsvLogger
     {
         const string TrialHeader="TrialNumber,TrialStart,C1PointDir,C1MoveDir,C2PointDir,C2MoveDir,Cue,CueOnsetTime,FirstGreenTime,ColorOnsetTime,CorrectResponse,ParticipantResponse,Accuracy,ReactionTime,RevealTimeout,ResponseTimeout,TrialEnd,DroppedFrameCount";
         const string TraceHeader="TrialNumber,FrameNumber,SampleTime,NFIndexUsed,NFValueRaw,NFValueClipped,NFLevel,InGreenZone,GreenHoldSec,ColorsRevealed,PostCueOnset,NFReadOk";
         const string DropHeader="TrialNumber,FrameNumber,VBLTime,MissedBySec";
-        readonly string trialPath, tracePath, dropPath;
+        const string SsvepHeader="TrialNumber,FrameNumber,EstimatedDisplayTime,FrameEndTime,PhaseTimeSec,NominalRefreshSlot,BorderLuminanceC1,BorderLuminanceC2,FrequencyC1Hz,FrequencyC2Hz,RefreshHz";
+        readonly string trialPath, tracePath, dropPath, ssvepPath;
         static readonly CultureInfo Inv=CultureInfo.InvariantCulture;
 
         public CsvLogger(string root, string participant, string block)
@@ -321,6 +329,7 @@ namespace LeafGame
             trialPath=Ensure(root,tag+"_leaves_trialdata.csv",TrialHeader);
             tracePath=Ensure(root,tag+"_leaves_nftrace.csv",TraceHeader);
             dropPath=Ensure(root,tag+"_leaves_droppedframes.csv",DropHeader);
+            ssvepPath=Ensure(root,tag+"_leaves_ssvepframes.csv",SsvepHeader);
         }
         static string Ensure(string root,string name,string header)
         {
@@ -359,6 +368,17 @@ namespace LeafGame
             var sb=new StringBuilder(rows.Count*50);
             foreach(var r in rows) sb.Append(trial).Append(',').Append(r.frame).Append(',').Append(F(r.vblTime)).Append(',').Append(F(r.missedBy)).AppendLine();
             File.AppendAllText(dropPath,sb.ToString());
+        }
+        public void WriteSsvep(int trial,IList<SsvepTraceRow> rows)
+        {
+            var sb=new StringBuilder(rows.Count*72);
+            foreach(var r in rows)sb.Append(trial).Append(',').Append(r.frame).Append(',')
+                .Append(F(r.estimatedDisplayTime)).Append(',').Append(F(r.frameEndTime)).Append(',')
+                .Append(F(r.phaseTime)).Append(',')
+                .Append(r.nominalSlot).Append(',').Append(F(r.luminanceC1)).Append(',')
+                .Append(F(r.luminanceC2)).Append(',').Append(F(r.frequencyC1Hz)).Append(',')
+                .Append(F(r.frequencyC2Hz)).Append(',').Append(F(r.refreshHz)).AppendLine();
+            File.AppendAllText(ssvepPath,sb.ToString());
         }
     }
 }

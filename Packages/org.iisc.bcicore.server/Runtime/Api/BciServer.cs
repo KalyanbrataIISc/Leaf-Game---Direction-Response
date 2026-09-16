@@ -120,7 +120,7 @@ namespace BciCore
                 : logDir;
 
             Config      = new BciConfig { Fs = 250, NumCh = 32, UvPerCount = 0.02235174f };
-            RingBuffer  = new ChannelRingBuffer(Config.NumCh, windowSamples: 2500);
+            RingBuffer  = new ChannelRingBuffer(Config.NumCh, ChannelRingBuffer.CapacityForRate(Config.Fs));
             _pcGaps = 0; _srvBad = 0;
 
             _listener = new EspTcpListener();
@@ -187,7 +187,7 @@ namespace BciCore
         static void InternalOnHello(BciConfig cfg)
         {
             Config = cfg;
-            RingBuffer?.Resize(cfg.NumCh);
+            RingBuffer?.Resize(cfg.NumCh, ChannelRingBuffer.CapacityForRate(cfg.Fs));
 
             // Start a new log session on every new connection
             if (_enableLogging)

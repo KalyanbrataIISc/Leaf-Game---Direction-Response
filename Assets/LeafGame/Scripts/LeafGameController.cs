@@ -62,9 +62,9 @@ namespace LeafGame
         [SerializeField, Min(0.0001f)] double NfClip=1;
         [SerializeField, Range(0f,1f)] double NfWhiteTopRelaxation=0.10;
 
-        [Header("SSVEP (precomputed before every trial)")]
-        [SerializeField, Min(0.01f)] double frequencyC1Hz=19;
-        [SerializeField, Min(0.01f)] double frequencyC2Hz=23;
+        [Header("SSVEP (continuous frame-timed phase)")]
+        [SerializeField, Min(0.01f)] double frequencyC1Hz=17;
+        [SerializeField, Min(0.01f)] double frequencyC2Hz=19;
         [SerializeField, Min(0.1f)] double precomputedPhaseHorizonSec=300;
         [SerializeField, Min(0)] double phaseHorizonSafetyMarginSec=2;
         [SerializeField, Range(0f,1f)] double ssvepMeanLuminance=0.5;
@@ -106,14 +106,14 @@ namespace LeafGame
         [SerializeField, Min(0)] float safeAreaPaddingReferencePx=0;
 
         [Header("Leaves (pixels at reference short side)")]
-        [SerializeField, Min(1)] float leafSizePx=100;
+        [SerializeField, Min(1)] float leafSizePx=150;
         [SerializeField, Min(0.01f)] float leafWidthMultiplier=0.42f;
         [SerializeField, Min(0)] float leafBorderMultiplier=0.20f;
         [SerializeField, Min(0)] float leafSpeedPxPerSec=200;
-        [SerializeField, Range(1,100)] int leavesPerFlock=10;
+        [SerializeField, Range(1,100)] int leavesPerFlock=8;
         [SerializeField, Min(0)] float laneClearanceMarginPx=6;
         [SerializeField, Min(0)] int maxFieldShrinkPx=400;
-        [SerializeField, Min(1)] int minRepeatsPerAxis=2;
+        [SerializeField, Min(1)] int minRepeatsPerAxis=1;
         [SerializeField, Range(3,64)] int leafArcPoints=10;
         [SerializeField] bool verifyLeafPathsAtSetup=true;
         [SerializeField, Min(1)] int verificationMaxFrames=40000;
@@ -198,11 +198,12 @@ namespace LeafGame
         int trialIndex,trialFrame,preCueFrames,cueOnsetFrame,revealDeadlineFrame,responseDeadlineFrame;
         int feedbackFrames,feedbackRemaining,itiRemaining,nfTraceEvery,nfGreenHoldFrames,greenHoldFrames;
         int previousPhaseSlot=-1,droppedCount;
-        double refreshHz,ifi,trialRefreshHz,experimentT0,trialPhaseT0,trialStartTime,cueOnsetTime,firstGreenTime,colorOnsetTime,colorOnsetClock,reactionTime,nfLastFreshClock;
+        double refreshHz,ifi,trialRefreshHz,experimentT0,trialPhaseT0,trialStartTime,cueOnsetTime,firstGreenTime,colorOnsetTime,colorOnsetClock,reactionTime,nfLastFreshClock,lastFrameEndClock;
         float activePixelScale=1;
         double nfCurrent,nfLevel;
         readonly List<NfTraceRow> traceRows=new List<NfTraceRow>(256);
         readonly List<DroppedFrameRow> droppedRows=new List<DroppedFrameRow>(32);
+        readonly List<SsvepTraceRow> ssvepRows=new List<SsvepTraceRow>(2048);
         readonly List<bool> accuracyResults=new List<bool>(24);
         Vector2 touchStart;
         bool touchTracking;
@@ -239,6 +240,27 @@ namespace LeafGame
             state=AppState.Setup;
             InitializeRuntimeSettings();
             InitializeAestheticPresentation();
+            StartCoroutine(CaptureFrameEndClock());
+        }
+
+        IEnumerator CaptureFrameEndClock()
+        {
+            var frameEnd=new WaitForEndOfFrame();
+            while(true)
+            {
+                yield return frameEnd;
+                lastFrameEndClock=MonotonicClock.Now;
+                if(state==AppState.Trial&&ssvepRows.Count>0)
+                {
+                    int index=ssvepRows.Count-1;
+                    SsvepTraceRow row=ssvepRows[index];
+                    if(row.frame==trialFrame&&double.IsNaN(row.frameEndTime))
+                    {
+                        row.frameEndTime=lastFrameEndClock-experimentT0;
+                        ssvepRows[index]=row;
+                    }
+                }
+            }
         }
 
         void InitializeGameplayFromSettings()
@@ -535,8 +557,8 @@ namespace LeafGame
             trial=trials[trialIndex];trialFrame=0;finishQueued=false;colorsRevealed=false;colorOnsetCommitted=false;
             inGreen=false;inFeedback=false;accuracy=false;revealTimeout=false;responseTimeout=false;
             participantResponse=missedResponseText;feedbackText="";nfCurrent=0;nfLevel=0;greenHoldFrames=0;previousPhaseSlot=-1;droppedCount=0;
-            cueOnsetTime=firstGreenTime=colorOnsetTime=reactionTime=double.NaN;
-            traceRows.Clear();droppedRows.Clear();
+            trialStartTime=cueOnsetTime=firstGreenTime=colorOnsetTime=reactionTime=double.NaN;
+            traceRows.Clear();droppedRows.Clear();ssvepRows.Clear();
             preCueFrames=Math.Max(1,Mathf.RoundToInt((float)((PreCueConstantSec+TrialPlanner.TruncatedExponential(PreCueExpMeanSec,PreCueExpMaxSec,rng))/ifi)));
             cueOnsetFrame=preCueFrames+1;revealDeadlineFrame=preCueFrames+Math.Max(1,Mathf.RoundToInt((float)(NfRevealTimeoutSec/ifi)));
             responseDeadlineFrame=int.MaxValue;feedbackFrames=Math.Max(1,Mathf.RoundToInt((float)(FeedbackSec/ifi)));
@@ -552,10 +574,13 @@ namespace LeafGame
             phaseSchedule=new SsvepPhaseSchedule(refreshHz,actualHorizon,frequencyC1Hz,frequencyC2Hz,
                 ssvepMeanLuminance,ssvepModulationDepth,phaseC1Degrees,phaseC2Degrees);
             int traceCapacity=Math.Max(4,Mathf.CeilToInt((float)(actualHorizon/Math.Max(0.001,NfTraceIntervalSec)))+4);
+            int frameCapacity=Math.Max(4,Mathf.CeilToInt((float)(worstCaseHorizon*refreshHz))+16);
             if(traceRows.Capacity<traceCapacity)traceRows.Capacity=traceCapacity;
-            if(droppedRows.Capacity<phaseSchedule.Count)droppedRows.Capacity=phaseSchedule.Count;
-            trialPhaseT0=MonotonicClock.Now;trialStartTime=Elapsed;state=AppState.Trial;
-            triggers.Send("trialstart",trialStartTrigger);
+            if(droppedRows.Capacity<frameCapacity)droppedRows.Capacity=frameCapacity;
+            if(ssvepRows.Capacity<frameCapacity)ssvepRows.Capacity=frameCapacity;
+            // The first stimulus frame fixes the phase origin to the preceding
+            // frame end. Unity provides no actual VBL timestamp like MATLAB.
+            trialPhaseT0=double.NaN;state=AppState.Trial;
         }
 
         void UpdateTrial()
@@ -581,14 +606,19 @@ namespace LeafGame
                 else greenHoldFrames=0;
             }
             LeafLaneLayout.Advance(leaves,field.rect);
-            double predicted=(MonotonicClock.Now-trialPhaseT0)+presentationLookAheadFrames*ifi;
-            if(!phaseSchedule.TrySampleForPresentation(predicted,out int slot,out float lum1,out float lum2)){Fatal("Precomputed SSVEP phase horizon exhausted.");return;}
+            if(trialFrame==1)trialPhaseT0=lastFrameEndClock>0?lastFrameEndClock:MonotonicClock.Now;
+            double predictedClock=(lastFrameEndClock>0?lastFrameEndClock:MonotonicClock.Now)+presentationLookAheadFrames*ifi;
+            double predicted=predictedClock-trialPhaseT0;
+            if(!phaseSchedule.TrySampleForPresentation(predicted,out int slot,out float lum1,out float lum2)){Fatal("SSVEP phase horizon exhausted.");return;}
             if(previousPhaseSlot>=0&&slot>previousPhaseSlot+1)
             {
                 int skipped=slot-previousPhaseSlot-1;droppedCount+=skipped;
                 droppedRows.Add(new DroppedFrameRow{frame=trialFrame,vblTime=Elapsed,missedBy=skipped*ifi});
             }
             previousPhaseSlot=slot;
+            ssvepRows.Add(new SsvepTraceRow{frame=trialFrame,estimatedDisplayTime=predictedClock-experimentT0,frameEndTime=double.NaN,
+                phaseTime=predicted,nominalSlot=slot,luminanceC1=lum1,luminanceC2=lum2,
+                frequencyC1Hz=frequencyC1Hz,frequencyC2Hz=frequencyC2Hz,refreshHz=refreshHz});
             Color fill1,fill2;
             if(preCue){fill1=fill2=Render(preCueLeafFillSrgb);}
             else if(colorsRevealed){fill1=Render(c1Srgb);fill2=Render(c2Srgb);}
@@ -598,6 +628,7 @@ namespace LeafGame
             visuals.SetCueVisible(true,preCue?Render(cuePreSrgb):Render(trial.cue==CueKind.C1?c1Srgb:c2Srgb));
             visuals.SetCueText(preCue?"":(inFeedback?feedbackText:(trial.cue==CueKind.C1?cueC1Word:cueC2Word)),inFeedback?(accuracy?Render(successSrgb):Render(failureSrgb)):Render(cueTextSrgb));
 
+            if(trialFrame==1)StartCoroutine(CommitPresented("start"));
             if(trialFrame==cueOnsetFrame)StartCoroutine(CommitPresented("cue"));
             if(firstGreenNow)StartCoroutine(CommitPresented("green"));
             if(revealNow)StartCoroutine(CommitPresented("reveal"));
@@ -624,7 +655,8 @@ namespace LeafGame
         {
             int index=trialIndex;yield return new WaitForEndOfFrame();
             if(state!=AppState.Trial||trialIndex!=index)yield break;
-            if(which=="cue"){cueOnsetTime=Elapsed;triggers.Send("cueonset",cueOnsetTrigger);}
+            if(which=="start"){trialStartTime=Elapsed;triggers.Send("trialstart",trialStartTrigger);}
+            else if(which=="cue"){cueOnsetTime=Elapsed;triggers.Send("cueonset",cueOnsetTrigger);}
             else if(which=="green"){if(double.IsNaN(firstGreenTime))firstGreenTime=Elapsed;}
             else{colorOnsetClock=MonotonicClock.Now;colorOnsetTime=Elapsed;colorOnsetCommitted=true;triggers.Send("success",successTrigger);}
         }
@@ -634,7 +666,8 @@ namespace LeafGame
         {
             yield return new WaitForEndOfFrame();triggers.Send("trialstop",trialStopTrigger);double end=Elapsed;
             logger.WriteTrial(trialIndex+1,trialStartTime,trial,cueOnsetTime,firstGreenTime,colorOnsetTime,participantResponse,accuracy,reactionTime,revealTimeout,responseTimeout,end,droppedCount);
-            logger.WriteTrace(trialIndex+1,trial.NfIndex+1,traceRows);logger.WriteDropped(trialIndex+1,droppedRows);accuracyResults.Add(accuracy);
+            logger.WriteTrace(trialIndex+1,trial.NfIndex+1,traceRows);logger.WriteDropped(trialIndex+1,droppedRows);
+            logger.WriteSsvep(trialIndex+1,ssvepRows);accuracyResults.Add(accuracy);
             visuals.ClearLeaves();visuals.SetCueVisible(true,Render(cuePreSrgb));state=AppState.Iti;
             itiRemaining=Math.Max(1,Mathf.RoundToInt((float)(ItiSec/ifi)));trialIndex++;
         }

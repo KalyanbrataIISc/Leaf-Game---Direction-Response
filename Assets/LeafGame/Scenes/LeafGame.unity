@@ -166,13 +166,15 @@ MonoBehaviour:
   useFixedRandomSeed: 0
   fixedRandomSeed: 918273
   mixParticipantAndBlockIntoSeed: 1
+  startTrialWithCue: 1
+  cueFirstMaxTrialSec: 15
   PreCueConstantSec: 1
   PreCueExpMeanSec: 3
   PreCueExpMaxSec: 5
   NfRevealTimeoutSec: 10
   ResponseTimeoutSec: 4
   FeedbackSec: 1
-  ItiSec: 1
+  ItiSec: 5
   nfSourceType: 2
   nfFilePath: C:\Users\Kalyanbrata\Documents\MATLAB\FeatureAttention\nf.txt
   nfPathMaximumCharacters: 1024
@@ -208,6 +210,7 @@ MonoBehaviour:
   triggerPort: 5007
   resetTrigger: 0
   trialStartTrigger: 20
+  trialStartC2Trigger: 21
   cueOnsetTrigger: 45
   successTrigger: 50
   responseTrigger: 40
@@ -284,13 +287,13 @@ MonoBehaviour:
     independently.
 
 
-    At first only the flickering outlines are visible. The centre
-    box turns a color and shows Pointing or Moving. Concentrating on that group brightens
-    the leaves. Hold them green to reveal their true colors.
+    The leaves first appear as flickering outlines. Watch the
+    centre box when it shows a color and Pointing or Moving. Concentrating on that
+    group brightens the leaves. Hold them green to reveal their true colors.
 
 
-    Only then answer
-    with an arrow key or a swipe. Earlier responses are ignored.'
+    Only
+    then answer with an arrow key or a swipe. Earlier responses are ignored.'
   participant: 000
   block: 000
 --- !u!4 &234429827

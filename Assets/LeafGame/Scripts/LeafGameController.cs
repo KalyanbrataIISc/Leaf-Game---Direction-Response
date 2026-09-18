@@ -38,13 +38,17 @@ namespace LeafGame
         [SerializeField] bool mixParticipantAndBlockIntoSeed=true;
 
         [Header("Trial Timing (seconds)")]
+        [SerializeField] bool startTrialWithCue=true;
+        [SerializeField, Min(0.0001f)] double cueFirstMaxTrialSec=15;
+        [Header("Pre-cue mode timing (when cue-first is Off)")]
         [SerializeField, Min(0)] double PreCueConstantSec=1;
         [SerializeField, Min(0.0001f)] double PreCueExpMeanSec=3;
         [SerializeField, Min(0)] double PreCueExpMaxSec=5;
         [SerializeField, Min(0.0001f)] double NfRevealTimeoutSec=10;
+        [Header("Both trial modes")]
         [SerializeField, Min(0.0001f)] double ResponseTimeoutSec=4;
         [SerializeField, Min(0)] double FeedbackSec=1;
-        [SerializeField, Min(0)] double ItiSec=1;
+        [SerializeField, Min(0)] double ItiSec=5;
 
         [Header("Neurofeedback")]
         [SerializeField] NfSourceType nfSourceType=NfSourceType.Tcp;
@@ -89,6 +93,7 @@ namespace LeafGame
         [Header("Trigger Codes (MATLAB defaults)")]
         [SerializeField, Range(0,255)] int resetTrigger=0;
         [SerializeField, Range(0,255)] int trialStartTrigger=20;
+        [SerializeField, Range(0,255)] int trialStartC2Trigger=21;
         [SerializeField, Range(0,255)] int cueOnsetTrigger=45;
         [SerializeField, Range(0,255)] int successTrigger=50;
         [SerializeField, Range(0,255)] int responseTrigger=40;
@@ -169,7 +174,7 @@ namespace LeafGame
         [SerializeField] string instructionC2Label="This color -> use its MOVING direction";
         [SerializeField] string nfPathLabel="NF file path";
         [SerializeField] string resolvedNfPathLabel="Resolved NF path: ";
-        [SerializeField, TextArea(5,12)] string instructionsText="INSTRUCTIONS\n\nTwo groups of leaves move around the screen. Each group points in one direction and moves in another (up / down / left / right), independently.\n\nAt first only the flickering outlines are visible. The centre box turns a color and shows Pointing or Moving. Concentrating on that group brightens the leaves. Hold them green to reveal their true colors.\n\nOnly then answer with an arrow key or a swipe. Earlier responses are ignored.";
+        [SerializeField, TextArea(5,12)] string instructionsText="INSTRUCTIONS\n\nTwo groups of leaves move around the screen. Each group points in one direction and moves in another (up / down / left / right), independently.\n\nThe leaves first appear as flickering outlines. Watch the centre box when it shows a color and Pointing or Moving. Concentrating on that group brightens the leaves. Hold them green to reveal their true colors.\n\nOnly then answer with an arrow key or a swipe. Earlier responses are ignored.";
 
 
         [Header("Session Defaults")]
@@ -198,7 +203,7 @@ namespace LeafGame
         int trialIndex,trialFrame,preCueFrames,cueOnsetFrame,revealDeadlineFrame,responseDeadlineFrame;
         int feedbackFrames,feedbackRemaining,itiRemaining,nfTraceEvery,nfGreenHoldFrames,greenHoldFrames;
         int previousPhaseSlot=-1,droppedCount;
-        double refreshHz,ifi,trialRefreshHz,experimentT0,trialPhaseT0,trialStartTime,cueOnsetTime,firstGreenTime,colorOnsetTime,colorOnsetClock,reactionTime,nfLastFreshClock,lastFrameEndClock;
+        double refreshHz,ifi,trialRefreshHz,experimentT0,trialPhaseT0,trialStartTime,trialStartClock,cueOnsetTime,firstGreenTime,colorOnsetTime,colorOnsetClock,reactionTime,nfLastFreshClock,lastFrameEndClock;
         float activePixelScale=1;
         double nfCurrent,nfLevel;
         readonly List<NfTraceRow> traceRows=new List<NfTraceRow>(256);
@@ -557,10 +562,11 @@ namespace LeafGame
             trial=trials[trialIndex];trialFrame=0;finishQueued=false;colorsRevealed=false;colorOnsetCommitted=false;
             inGreen=false;inFeedback=false;accuracy=false;revealTimeout=false;responseTimeout=false;
             participantResponse=missedResponseText;feedbackText="";nfCurrent=0;nfLevel=0;greenHoldFrames=0;previousPhaseSlot=-1;droppedCount=0;
-            trialStartTime=cueOnsetTime=firstGreenTime=colorOnsetTime=reactionTime=double.NaN;
+            trialStartClock=trialStartTime=cueOnsetTime=firstGreenTime=colorOnsetTime=reactionTime=double.NaN;
             traceRows.Clear();droppedRows.Clear();ssvepRows.Clear();
-            preCueFrames=Math.Max(1,Mathf.RoundToInt((float)((PreCueConstantSec+TrialPlanner.TruncatedExponential(PreCueExpMeanSec,PreCueExpMaxSec,rng))/ifi)));
-            cueOnsetFrame=preCueFrames+1;revealDeadlineFrame=preCueFrames+Math.Max(1,Mathf.RoundToInt((float)(NfRevealTimeoutSec/ifi)));
+            preCueFrames=startTrialWithCue?0:Math.Max(1,Mathf.RoundToInt((float)((PreCueConstantSec+TrialPlanner.TruncatedExponential(PreCueExpMeanSec,PreCueExpMaxSec,rng))/ifi)));
+            cueOnsetFrame=preCueFrames+1;
+            revealDeadlineFrame=startTrialWithCue?int.MaxValue:preCueFrames+Math.Max(1,Mathf.RoundToInt((float)(NfRevealTimeoutSec/ifi)));
             responseDeadlineFrame=int.MaxValue;feedbackFrames=Math.Max(1,Mathf.RoundToInt((float)(FeedbackSec/ifi)));
             nfTraceEvery=Math.Max(1,Mathf.RoundToInt((float)(NfTraceIntervalSec/ifi)));
             nfGreenHoldFrames=Math.Max(1,Mathf.RoundToInt((float)(NfGreenHoldSec/ifi)));
@@ -569,7 +575,7 @@ namespace LeafGame
             if(!layout.feasible){Fatal(layout.message);return;}leaves=layout.leaves;
             inner1=LeafVisualRenderer.CreateLeafShape(trial.c1Point,LeafLength,LeafWidth,leafArcPoints);outer1=LeafVisualRenderer.CreateLeafShape(trial.c1Point,OuterLength,OuterWidth,leafArcPoints);
             inner2=LeafVisualRenderer.CreateLeafShape(trial.c2Point,LeafLength,LeafWidth,leafArcPoints);outer2=LeafVisualRenderer.CreateLeafShape(trial.c2Point,OuterLength,OuterWidth,leafArcPoints);
-            double worstCaseHorizon=PreCueConstantSec+PreCueExpMaxSec+NfRevealTimeoutSec+ResponseTimeoutSec+FeedbackSec+phaseHorizonSafetyMarginSec;
+            double worstCaseHorizon=(startTrialWithCue?cueFirstMaxTrialSec:PreCueConstantSec+PreCueExpMaxSec+NfRevealTimeoutSec+ResponseTimeoutSec+FeedbackSec)+phaseHorizonSafetyMarginSec;
             double actualHorizon=Math.Max(precomputedPhaseHorizonSec,worstCaseHorizon);
             phaseSchedule=new SsvepPhaseSchedule(refreshHz,actualHorizon,frequencyC1Hz,frequencyC2Hz,
                 ssvepMeanLuminance,ssvepModulationDepth,phaseC1Degrees,phaseC2Degrees);
@@ -629,33 +635,50 @@ namespace LeafGame
             visuals.SetCueText(preCue?"":(inFeedback?feedbackText:(trial.cue==CueKind.C1?cueC1Word:cueC2Word)),inFeedback?(accuracy?Render(successSrgb):Render(failureSrgb)):Render(cueTextSrgb));
 
             if(trialFrame==1)StartCoroutine(CommitPresented("start"));
-            if(trialFrame==cueOnsetFrame)StartCoroutine(CommitPresented("cue"));
+            if(!startTrialWithCue&&trialFrame==cueOnsetFrame)StartCoroutine(CommitPresented("cue"));
             if(firstGreenNow)StartCoroutine(CommitPresented("green"));
             if(revealNow)StartCoroutine(CommitPresented("reveal"));
             if((trialFrame-1)%nfTraceEvery==0)traceRows.Add(new NfTraceRow{frame=trialFrame,sampleTime=Elapsed,raw=nfCurrent,clipped=clipped,
                 level=nfLevel,green=inGreen,greenHold=greenHoldFrames*ifi,revealed=colorsRevealed,postCue=!preCue,readOk=readOk});
 
+            bool cueFirstExpired=startTrialWithCue&&!double.IsNaN(trialStartClock)&&MonotonicClock.Now-trialStartClock>=cueFirstMaxTrialSec;
             if(inFeedback)
             {
                 feedbackRemaining--;if(feedbackRemaining<=0)QueueFinish();
             }
             else if(colorsRevealed&&colorOnsetCommitted)
             {
-                if(TryGetDirection(out Direction4 response))
+                if(!cueFirstExpired&&TryGetDirection(out Direction4 response))
                 {
                     participantResponse=DirectionUtil.Text(response);reactionTime=MonotonicClock.Now-colorOnsetClock;accuracy=response==trial.CorrectResponse;
                     triggers.Send("response",responseTrigger);feedbackText=accuracy?correctFeedbackText:incorrectFeedbackText;inFeedback=true;feedbackRemaining=feedbackFrames;
                 }
-                else if(trialFrame>=responseDeadlineFrame){responseTimeout=true;QueueFinish();}
+                else if(trialFrame>=responseDeadlineFrame||cueFirstExpired){responseTimeout=true;QueueFinish();}
             }
             else if(!preCue&&!colorsRevealed&&trialFrame>=revealDeadlineFrame){revealTimeout=true;QueueFinish();}
+            if(cueFirstExpired)
+            {
+                if(!finishQueued&&!inFeedback)
+                {
+                    if(colorsRevealed)responseTimeout=true;
+                    else revealTimeout=true;
+                }
+                QueueFinish();
+            }
         }
 
         IEnumerator CommitPresented(string which)
         {
             int index=trialIndex;yield return new WaitForEndOfFrame();
             if(state!=AppState.Trial||trialIndex!=index)yield break;
-            if(which=="start"){trialStartTime=Elapsed;triggers.Send("trialstart",trialStartTrigger);}
+            if(which=="start")
+            {
+                trialStartClock=MonotonicClock.Now;
+                trialStartTime=trialStartClock-experimentT0;
+                if(startTrialWithCue)cueOnsetTime=trialStartTime;
+                int code=startTrialWithCue&&trial.cue==CueKind.C2?trialStartC2Trigger:trialStartTrigger;
+                triggers.Send("trialstart",code);
+            }
             else if(which=="cue"){cueOnsetTime=Elapsed;triggers.Send("cueonset",cueOnsetTrigger);}
             else if(which=="green"){if(double.IsNaN(firstGreenTime))firstGreenTime=Elapsed;}
             else{colorOnsetClock=MonotonicClock.Now;colorOnsetTime=Elapsed;colorOnsetCommitted=true;triggers.Send("success",successTrigger);}

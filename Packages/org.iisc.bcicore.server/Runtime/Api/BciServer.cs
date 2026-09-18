@@ -20,8 +20,9 @@ namespace BciCore
     public static class BciServer
     {
         // ── Configuration ─────────────────────────────────────────────────────
-        public const int DefaultPort    = 5005;
-        public const string DefaultLogSubDir = "BciCoreLogs";
+        public const int DefaultPort          = 5005;
+        public const int DefaultFanoutPort    = 5006;
+        public const string DefaultLogSubDir  = "BciCoreLogs";
 
         // ── State ─────────────────────────────────────────────────────────────
         public static BciConfig        Config          { get; private set; }
@@ -89,6 +90,9 @@ namespace BciCore
         /// <summary>NF frame: smi_14gt18_shaped, smi_18gt14_shaped. Always active.</summary>
         public static event Action<NfSample>               OnNfSample;
 
+        /// <summary>HW-CCA frame: score_A, score_B, fb_AgtB, fb_BgtA. Always active.</summary>
+        public static event Action<CcaSample>              OnCcaSample;
+
         /// <summary>HEALTH telemetry (board uptime, drops, heap). Always active.</summary>
         public static event Action<HealthFrame>            OnHealth;
 
@@ -107,10 +111,10 @@ namespace BciCore
         // ── Lifecycle ─────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Start the TCP server and begin listening for the ESP32.
+        /// Start the TCP server and begin listening for the ESP32 (port) and Game fan-out (fanoutPort).
         /// Optionally configure the log directory (pass null to use default).
         /// </summary>
-        public static void StartServer(int port = DefaultPort, string logDir = null, bool enableLogging = true)
+        public static void StartServer(int port = DefaultPort, int fanoutPort = DefaultFanoutPort, string logDir = null, bool enableLogging = true)
         {
             if (_listener != null) return;   // already running
 
@@ -119,28 +123,29 @@ namespace BciCore
                 ? Path.Combine(Application.persistentDataPath, DefaultLogSubDir)
                 : logDir;
 
-            Config      = new BciConfig { Fs = 250, NumCh = 32, UvPerCount = 0.02235174f };
+            Config      = new BciConfig { Fs = 250, NumCh = 32, AnalysisCh = 16, UvPerCount = 0.02235174f };
             RingBuffer  = new ChannelRingBuffer(Config.NumCh, ChannelRingBuffer.CapacityForRate(Config.Fs));
             _pcGaps = 0; _srvBad = 0;
 
             _listener = new EspTcpListener();
 
             // Wire internal callbacks
-            _listener.OnHello       = InternalOnHello;
-            _listener.OnRawFrame    = InternalOnRawFrame;
-            _listener.OnRawCounts   = InternalOnRawCounts;
-            _listener.OnProcFrame   = InternalOnProcFrame;
-            _listener.OnAlpha       = InternalOnAlpha;
-            _listener.OnSsvep       = InternalOnSsvep;
-            _listener.OnNfSample    = InternalOnNf;
-            _listener.OnHealth      = InternalOnHealth;
-            _listener.OnMarker      = InternalOnMarker;
-            _listener.OnMlResult    = InternalOnMl;
-            _listener.OnStats       = InternalOnStats;
+            _listener.OnHello        = InternalOnHello;
+            _listener.OnRawFrame     = InternalOnRawFrame;
+            _listener.OnRawCounts    = InternalOnRawCounts;
+            _listener.OnProcFrame    = InternalOnProcFrame;
+            _listener.OnAlpha        = InternalOnAlpha;
+            _listener.OnSsvep        = InternalOnSsvep;
+            _listener.OnNfSample     = InternalOnNf;
+            _listener.OnCcaSample    = InternalOnCca;
+            _listener.OnHealth       = InternalOnHealth;
+            _listener.OnMarker       = InternalOnMarker;
+            _listener.OnMlResult     = InternalOnMl;
+            _listener.OnStats        = InternalOnStats;
             _listener.OnStateChanged = InternalOnStateChanged;
 
-            _listener.StartListening(port);
-            Debug.Log($"[BciCore] TCP server started on port {port}. Waiting for ESP32…");
+            _listener.StartListening(port, fanoutPort);
+            Debug.Log($"[BciCore] TCP server started on port {port} (fan-out on port {fanoutPort}). Waiting for ESP32…");
         }
 
         /// <summary>Enable RAW/PROC/ANALYSIS/SSVEP event routing (for calibration display).</summary>
@@ -194,7 +199,8 @@ namespace BciCore
             {
                 _logger?.Dispose();
                 _pendingAlpha.Clear();
-                _logger = new CsvSessionLogger(_logDir, cfg.NumCh);
+                int ach = cfg.AnalysisCh > 0 ? cfg.AnalysisCh : 16;
+                _logger = new CsvSessionLogger(_logDir, cfg.NumCh, ach);
             }
 
             OnHello?.Invoke(cfg);
@@ -227,6 +233,14 @@ namespace BciCore
             _pendingAlpha.Remove(nf.Seq);
             _logger?.WriteFeatures(nf.Seq, nf, alpha);
             OnNfSample?.Invoke(nf);
+        }
+
+        static void InternalOnCca(CcaSample cca)
+        {
+            _pendingAlpha.TryGetValue(cca.Seq, out float[] alpha);
+            _pendingAlpha.Remove(cca.Seq);
+            _logger?.WriteCcaFeatures(cca.Seq, cca, alpha);
+            OnCcaSample?.Invoke(cca);
         }
 
         static void InternalOnHealth(HealthFrame h)

@@ -4,8 +4,8 @@
 //  Files written per connection run (timestamped):
 //    eeg_<ts>_raw.csv      — seq + 32 raw counts + marker
 //    eeg_<ts>_signals.csv  — seq + 32 filtered µV + marker    (from PROC frames)
-//    eeg_<ts>_features.csv — seq, markers, smi_14gt18, smi_18gt14, shaped×2, alpha[8]
-//    eeg_<ts>_health.csv   — wall_clock, board_ms, board_drops, pc_gaps, … (1 Hz + markers)
+//    eeg_<ts>_features.csv — seq, marker, CCA/SMI scores, alpha[analysisCh]
+//    eeg_<ts>_health.csv   — wall_clock, board_ms, board_drops, pc_gaps, ... (1 Hz + markers)
 //
 //  All I/O is on a dedicated background thread via LogQueue; calling code
 //  never blocks.
@@ -21,8 +21,10 @@ namespace BciCore
     {
         readonly LogQueue _raw;
         readonly LogQueue _sig;
-        readonly LogQueue _feat;
+        LogQueue          _feat;
         readonly LogQueue _hlth;
+        readonly int      _analysisCh;
+        readonly object   _featLock = new object();
 
         public string SessionDir   { get; }
         public string RawPath      { get; }
@@ -32,8 +34,9 @@ namespace BciCore
 
         static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-        public CsvSessionLogger(string logDir, int numCh = 32, bool ssvepPerChannel = false)
+        public CsvSessionLogger(string logDir, int numCh = 32, int analysisCh = 16, bool ssvepPerChannel = false)
         {
+            _analysisCh = analysisCh > 0 ? analysisCh : 16;
             string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             SessionDir = Path.Combine(logDir, $"eeg_{ts}");
             Directory.CreateDirectory(SessionDir);
@@ -48,12 +51,9 @@ namespace BciCore
             string sigHdr = "seq," + Join("filt", numCh) + ",marker";
             _sig = new LogQueue(SignalsPath, sigHdr);
 
-            // ── features ──
+            // ── features (lazy initialised on first sample to auto-detect CCA vs SMI header) ──
             FeaturesPath = Path.Combine(SessionDir, $"eeg_{ts}_features.csv");
-            string featHdr = "seq,marker,smi_14gt18,smi_18gt14,smi_14gt18_shaped,smi_18gt14_shaped,"
-                           + "alphaNF,ssvepNF,alphaLeft,alphaRight,ssvepRight14,ssvepLeft18,"
-                           + JoinIndexed("alpha", 8);
-            _feat = new LogQueue(FeaturesPath, featHdr);
+            _feat = null;
 
             // ── health ──
             HealthPath = Path.Combine(SessionDir, $"eeg_{ts}_health.csv");
@@ -61,19 +61,35 @@ namespace BciCore
                                  + "board_miss,board_dspmax_us,srv_bad,free_heap,marker,event";
             _hlth = new LogQueue(HealthPath, hlthHdr);
 
-            Debug.Log($"[BciCore] Logging session started → {SessionDir}");
+            Debug.Log($"[BciCore] Logging session started -> {SessionDir} (NumCh={numCh}, AnalysisCh={_analysisCh})");
+        }
+
+        void EnsureFeatureHeader(bool isCca)
+        {
+            if (_feat != null) return;
+            lock (_featLock)
+            {
+                if (_feat != null) return;
+                string featHdr = isCca
+                    ? "seq,marker,fb_AgtB,fb_BgtA,score_A,score_B,"
+                    + "alphaNF,ssvepNF,alphaLeft,alphaRight,ssvepRight14,ssvepLeft18,"
+                    + JoinIndexed("alpha", _analysisCh)
+                    : "seq,marker,smi_14gt18,smi_18gt14,smi_14gt18_shaped,smi_18gt14_shaped,"
+                    + "alphaNF,ssvepNF,alphaLeft,alphaRight,ssvepRight14,ssvepLeft18,"
+                    + JoinIndexed("alpha", _analysisCh);
+                _feat = new LogQueue(FeaturesPath, featHdr);
+                Debug.Log($"[BciCore] features.csv header initialised (Mode: {(isCca ? "CCA" : "SMI")}, AnalysisCh: {_analysisCh})");
+            }
         }
 
         // ── Raw frame ────────────────────────────────────────────────────────
-
         public void WriteRaw(uint seq, int[] counts, ushort marker)
         {
             if (_raw == null || counts == null) return;
             _raw.Enqueue($"{seq},{IntArr(counts)},{marker}");
         }
 
-        // ── PROC frame (signals.csv) ──────────────────────────────────────────
-
+        // ── PROC frame (signals.csv) ─────────────────────────────────────────
         public void WriteSignals(uint seq, float[] uv, ushort marker)
         {
             if (_sig == null || uv == null) return;
@@ -81,20 +97,30 @@ namespace BciCore
         }
 
         // ── NF sample (features.csv) ─────────────────────────────────────────
-
         public void WriteFeatures(uint seq, NfSample nf, float[] alpha)
         {
-            if (_feat == null) return;
-            string alphaStr = alpha != null ? FloatArr(alpha) : Zeros(8);
+            EnsureFeatureHeader(isCca: false);
+            string alphaStr = (alpha != null && alpha.Length > 0) ? FloatArr(alpha) : Zeros(_analysisCh);
             _feat.Enqueue(
                 $"{seq},{nf.Marker},{F(nf.Smi14gt18)},{F(nf.Smi18gt14)},"
               + $"{F(nf.Smi14gt18Shaped)},{F(nf.Smi18gt14Shaped)},"
-              + $"0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,"   // legacy aggregates → 0
+              + "0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,"
               + alphaStr);
         }
 
-        // ── Health / health-event ─────────────────────────────────────────────
+        // ── CCA sample (features.csv) ────────────────────────────────────────
+        public void WriteCcaFeatures(uint seq, CcaSample cca, float[] alpha)
+        {
+            EnsureFeatureHeader(isCca: true);
+            string alphaStr = (alpha != null && alpha.Length > 0) ? FloatArr(alpha) : Zeros(_analysisCh);
+            _feat.Enqueue(
+                $"{seq},{cca.Marker},{F(cca.FbAgtB)},{F(cca.FbBgtA)},"
+              + $"{F(cca.ScoreA)},{F(cca.ScoreB)},"
+              + "0.000000,0.000000,0.000000,0.000000,0.000000,0.000000,"
+              + alphaStr);
+        }
 
+        // ── Health / health-event ────────────────────────────────────────────
         public void WriteHealth(HealthFrame h, long pcGaps, long srvBad, string evt = "")
         {
             if (_hlth == null) return;
@@ -104,15 +130,14 @@ namespace BciCore
               + $"{srvBad},{h.FreeHeap},{h.Marker},{evt}");
         }
 
-        // ── Dispose ───────────────────────────────────────────────────────────
-
+        // ── Dispose ──────────────────────────────────────────────────────────
         public void Dispose()
         {
+            EnsureFeatureHeader(isCca: true);
             _raw?.Dispose(); _sig?.Dispose(); _feat?.Dispose(); _hlth?.Dispose();
         }
 
-        // ── Helpers ───────────────────────────────────────────────────────────
-
+        // ── Helpers ──────────────────────────────────────────────────────────
         static string F(float v)   => v.ToString("F6", Inv);
         static string Join(string prefix, int n)
         {

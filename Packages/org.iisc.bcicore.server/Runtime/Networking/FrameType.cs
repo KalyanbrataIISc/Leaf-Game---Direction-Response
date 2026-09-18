@@ -16,5 +16,6 @@ namespace BciCore
         Marker   = 0x07,  // uint16 marker latched by board
         Cmd      = 0x08,  // marker command: PC → ESP32
         Ml       = 0x09,  // pred_class (byte), confidence (float32), latency_ms (float32)
+        Cca      = 0x0A,  // HW-CCA: score_A, score_B, fb_AgtB, fb_BgtA, sampleCount, marker
     }
 }

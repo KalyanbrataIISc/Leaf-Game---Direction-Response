@@ -218,6 +218,51 @@ namespace BciCore
             return ml;
         }
 
+        /// <summary>
+        /// Parse CCA payload → CcaSample.
+        /// Payload is 22 bytes: score_A (f32), score_B (f32), fb_AgtB (f32), fb_BgtA (f32), sampleCount (u32), marker (u16).
+        /// </summary>
+        public static CcaSample ParseCca(byte[] payload, uint seq)
+        {
+            var cca = new CcaSample { Seq = seq };
+            if (payload == null || payload.Length < 22) return cca;
+            cca.ScoreA      = ReadF32LE(payload, 0);
+            cca.ScoreB      = ReadF32LE(payload, 4);
+            cca.FbAgtB      = ReadF32LE(payload, 8);
+            cca.FbBgtA      = ReadF32LE(payload, 12);
+            cca.SampleCount = ReadU32LE(payload, 16);
+            cca.Marker      = ReadU16LE(payload, 20);
+            return cca;
+        }
+
+        /// <summary>
+        /// Builds the 24-byte little-endian double[3] record expected by the game:
+        /// [0..7]: v0 (e.g. fb_AgtB)
+        /// [8..15]: v1 (e.g. fb_BgtA)
+        /// [16..23]: v2 (e.g. sampleCount)
+        /// </summary>
+        public static byte[] BuildGameFanoutRecord(double v0, double v1, double v2)
+        {
+            var buf = new byte[24];
+            WriteDoubleLE(buf, 0, v0);
+            WriteDoubleLE(buf, 8, v1);
+            WriteDoubleLE(buf, 16, v2);
+            return buf;
+        }
+
+        public static void WriteDoubleLE(byte[] buf, int offset, double val)
+        {
+            ulong bits = (ulong)System.BitConverter.DoubleToInt64Bits(val);
+            buf[offset + 0] = (byte)(bits & 0xFF);
+            buf[offset + 1] = (byte)((bits >> 8) & 0xFF);
+            buf[offset + 2] = (byte)((bits >> 16) & 0xFF);
+            buf[offset + 3] = (byte)((bits >> 24) & 0xFF);
+            buf[offset + 4] = (byte)((bits >> 32) & 0xFF);
+            buf[offset + 5] = (byte)((bits >> 40) & 0xFF);
+            buf[offset + 6] = (byte)((bits >> 48) & 0xFF);
+            buf[offset + 7] = (byte)((bits >> 56) & 0xFF);
+        }
+
         // ── Little-endian primitive readers ──────────────────────────────────
 
         public static uint   ReadU32LE(byte[] b, int o) =>

@@ -35,6 +35,7 @@ namespace BciCore
         public Action<AlphaFrame>               OnAlpha;
         public Action<SsvepFrame>               OnSsvep;
         public Action<NfSample>                 OnNfSample;
+        public Action<CcaSample>                OnCcaSample;
         public Action<HealthFrame>              OnHealth;
         public Action<ushort, uint>             OnMarker;
         public Action<MlResult>                 OnMlResult;
@@ -45,6 +46,9 @@ namespace BciCore
         TcpListener        _listener;
         TcpClient          _client;
         NetworkStream      _stream;
+        GameFanoutListener _fanoutListener;
+        UdpClient          _triggerUdp;
+        Thread             _triggerThread;
         readonly object    _sendLock = new object();
         volatile bool      _disposed;
         volatile bool      _running;
@@ -52,14 +56,14 @@ namespace BciCore
 
         // Config from HELLO
         BciConfig _cfg = new BciConfig { Fs = 250, NumCh = 32, UvPerCount = 0.02235174f };
-        int       _analysisCh = 8;
+        int       _analysisCh = 16;
 
         // Last time an NF frame was received (UnityElapsed seconds) — for IsReceivingNf.
         // Stored as long (IEEE-754 bit pattern) so we can use Interlocked for thread safety
         // (volatile double is illegal in C#).
         long _lastNfSecBits = -1L;   // -1 means "never received"
 
-        double LastNfSec
+        public double LastNfSec
         {
             get => System.BitConverter.Int64BitsToDouble(System.Threading.Interlocked.Read(ref _lastNfSecBits));
             set => System.Threading.Interlocked.Exchange(ref _lastNfSecBits, System.BitConverter.DoubleToInt64Bits(value));
@@ -77,7 +81,7 @@ namespace BciCore
 
         // ── Start / Stop ──────────────────────────────────────────────────────
 
-        public void StartListening(int port)
+        public void StartListening(int port, int fanoutPort = 5006, int udpTriggerPort = 5007)
         {
             if (_running) return;
             _running = true;
@@ -87,6 +91,55 @@ namespace BciCore
 
             _acceptThread = new Thread(() => AcceptLoop(port)) { IsBackground = true, Name = "BciCore-accept" };
             _acceptThread.Start();
+
+            if (fanoutPort > 0)
+            {
+                _fanoutListener = new GameFanoutListener(fanoutPort);
+            }
+
+            if (udpTriggerPort > 0)
+            {
+                StartTriggerUdp(udpTriggerPort);
+            }
+        }
+
+        void StartTriggerUdp(int udpPort)
+        {
+            try
+            {
+                _triggerUdp = new UdpClient(udpPort);
+                _triggerThread = new Thread(TriggerUdpLoop) { IsBackground = true, Name = "BciCore-TriggerUdp" };
+                _triggerThread.Start();
+                Debug.Log($"[BciCore] Listening for UDP triggers on port {udpPort} (forwarding to ESP32)");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[BciCore] Could not bind UDP trigger port {udpPort}: {ex.Message}");
+            }
+        }
+
+        void TriggerUdpLoop()
+        {
+            var ep = new IPEndPoint(IPAddress.Any, 0);
+            while (!_disposed && _triggerUdp != null)
+            {
+                try
+                {
+                    byte[] data = _triggerUdp.Receive(ref ep);
+                    if (data != null && data.Length > 0)
+                    {
+                        string text = System.Text.Encoding.ASCII.GetString(data).Trim();
+                        if (int.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int code))
+                        {
+                            SendMarker((ushort)(code & 0xFFFF));
+                            Debug.Log($"[BciCore] Received trigger code {code} via UDP from {ep}, forwarded to ESP32.");
+                        }
+                    }
+                }
+                catch (SocketException) when (_disposed) { break; }
+                catch (ObjectDisposedException) when (_disposed) { break; }
+                catch { }
+            }
         }
 
         public void StopListening()
@@ -95,6 +148,10 @@ namespace BciCore
             _running  = false;
             try { _listener?.Stop(); } catch { }
             try { _client?.Close();  } catch { }
+            try { _fanoutListener?.Dispose(); } catch { }
+            _fanoutListener = null;
+            try { _triggerUdp?.Close(); } catch { }
+            _triggerUdp = null;
         }
 
         public void Dispose() => StopListening();
@@ -288,7 +345,7 @@ namespace BciCore
                 {
                     case FrameType.Hello:
                         _cfg = FrameProtocol.ParseHello(payload);
-                        _analysisCh = _cfg.AnalysisCh > 0 ? _cfg.AnalysisCh : 8;
+                        _analysisCh = _cfg.AnalysisCh > 0 ? _cfg.AnalysisCh : 16;
                         BciServer.RingBuffer?.Resize(_cfg.NumCh, ChannelRingBuffer.CapacityForRate(_cfg.Fs));
                         var cfgCopy = _cfg;
                         MainThreadDispatcher.Enqueue(() => OnHello?.Invoke(cfgCopy));
@@ -374,7 +431,41 @@ namespace BciCore
                         {
                             var nf = FrameProtocol.ParseNf(payload, seq);
                             LastNfSec = UnityElapsed();
+
+                            // Relay to game fan-out port
+                            _fanoutListener?.Broadcast(nf.Smi14gt18Shaped, nf.Smi18gt14Shaped, (uint)nf.SampleCount);
+
                             MainThreadDispatcher.Enqueue(() => OnNfSample?.Invoke(nf));
+                        }
+                        else { badFrames++; }
+                        break;
+
+                    case FrameType.Cca:
+                        if (plen >= 22)
+                        {
+                            var cca = FrameProtocol.ParseCca(payload, seq);
+                            LastNfSec = UnityElapsed();
+
+                            // 1. Relay to game fan-out port (24-byte double[3] LE: [fb_AgtB, fb_BgtA, sampleCount])
+                            _fanoutListener?.Broadcast(cca.FbAgtB, cca.FbBgtA, cca.SampleCount);
+
+                            // 2. Synthetic NfSample for backwards-compatibility with general subscribers
+                            var nfFallback = new NfSample
+                            {
+                                Smi14gt18       = cca.ScoreA,
+                                Smi18gt14       = cca.ScoreB,
+                                Smi14gt18Shaped = cca.FbAgtB,
+                                Smi18gt14Shaped = cca.FbBgtA,
+                                SampleCount     = (int)cca.SampleCount,
+                                Marker          = cca.Marker,
+                                Seq             = cca.Seq
+                            };
+
+                            MainThreadDispatcher.Enqueue(() =>
+                            {
+                                OnCcaSample?.Invoke(cca);
+                                OnNfSample?.Invoke(nfFallback);
+                            });
                         }
                         else { badFrames++; }
                         break;

@@ -90,4 +90,16 @@ namespace BciCore
         public float[] Power;  // length = analysis_ch (typically 8)
         public uint    Seq;
     }
+
+    // ── HW-CCA result sample (CCA frame, type 0x0A) ──────────────────────────
+    public struct CcaSample
+    {
+        public float  ScoreA;       // 17 Hz HW-CCA correlation [0.0, 1.0]
+        public float  ScoreB;       // 19 Hz HW-CCA correlation [0.0, 1.0]
+        public float  FbAgtB;       // smoothed control signal: 17 Hz dominant [-1.0, +1.0]
+        public float  FbBgtA;       // smoothed control signal: 19 Hz dominant [-1.0, +1.0] (= -FbAgtB)
+        public uint   SampleCount;  // monotonic hop count
+        public ushort Marker;       // latched trigger
+        public uint   Seq;          // ADC sample sequence
+    }
 }

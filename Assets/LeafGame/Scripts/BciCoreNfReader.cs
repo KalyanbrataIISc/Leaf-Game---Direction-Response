@@ -24,6 +24,7 @@ namespace LeafGame
         public BciCoreNfReader()
         {
             BciServer.OnNfSample += OnSample;
+            BciServer.OnCcaSample += OnCca;
         }
 
         void OnSample(NfSample s)
@@ -37,6 +38,20 @@ namespace LeafGame
                 if (isFirst)
                     UnityEngine.Debug.Log(
                         $"[BciCore] First NF frame received — smi0(14>18_shaped)={_smi0:F4}, smi1(18>14_shaped)={_smi1:F4}. NF polling is active.");
+            }
+        }
+
+        void OnCca(CcaSample c)
+        {
+            lock (_gate)
+            {
+                bool isFirst = _seq < 0;
+                _smi0 = c.FbAgtB;
+                _smi1 = c.FbBgtA;
+                _seq++;
+                if (isFirst)
+                    UnityEngine.Debug.Log(
+                        $"[BciCore] First CCA frame received — fbAgtB={_smi0:F4}, fbBgtA={_smi1:F4}. NF polling active (zero baseline).");
             }
         }
 
@@ -55,6 +70,10 @@ namespace LeafGame
             }
         }
 
-        public void Dispose() => BciServer.OnNfSample -= OnSample;
+        public void Dispose()
+        {
+            BciServer.OnNfSample -= OnSample;
+            BciServer.OnCcaSample -= OnCca;
+        }
     }
 }

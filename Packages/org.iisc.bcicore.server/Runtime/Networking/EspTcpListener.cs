@@ -191,7 +191,7 @@ namespace BciCore
                 if (client == null) continue;
 
                 client.NoDelay = true;
-                client.ReceiveTimeout = 2000;
+                client.ReceiveTimeout = 5000;  // was 2000 � increased to survive Wi-Fi channel-scan stalls (~900 ms) plus reconnect burst
                 client.SendTimeout    = 1000;
                 try
                 {
@@ -366,17 +366,11 @@ namespace BciCore
                             for (int i = 0; i < nch; i++) uv[i] = counts[i] * uvpc;
                             BciServer.RingBuffer?.Write(uv);
 
-                            if (BciServer.CalibrationMode)
-                            {
-                                var uvCopy  = uv;
-                                var cntCopy = counts;
-                                uint seqCopy = seq; ushort mkCopy = rawMarker;
-                                MainThreadDispatcher.Enqueue(() =>
-                                {
-                                    OnRawCounts?.Invoke(cntCopy, mkCopy, seqCopy);
-                                    OnRawFrame?.Invoke(uvCopy, mkCopy, seqCopy);
-                                });
-                            }
+                            // Per-sample CalibrationMode RAW dispatch removed:
+                            // At 2000 SPS, enqueueing 2 closures/sample (OnRawCounts + OnRawFrame)
+                            // creates ~4000 GC allocations/sec (~1.5 MB/s) on Android, triggering
+                            // major GC stalls (10-80ms) that back-pressure frameQ -> ESP32 disconnects.
+                            // CalibrationScreen reads waveforms from RingBuffer.ReadRecent() on a timer.
                         }
                         else { badFrames++; }
                         break;
@@ -396,11 +390,7 @@ namespace BciCore
                                 BciServer.IsUsingProcessedSignals = true;
                             }
 
-                            if (BciServer.CalibrationMode)
-                            {
-                                var procCopy = proc; uint seqCopy = seq; ushort mkCopy = procMarker;
-                                MainThreadDispatcher.Enqueue(() => OnProcFrame?.Invoke(procCopy, mkCopy, seqCopy));
-                            }
+                            // Per-sample CalibrationMode PROC dispatch also removed (same reason).
                         }
                         else { badFrames++; }
                         break;
@@ -562,7 +552,7 @@ namespace BciCore
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        static bool ReadExact(Socket socket, byte[] buf, int offset, int count, int timeoutMs = 2000)
+        static bool ReadExact(Socket socket, byte[] buf, int offset, int count, int timeoutMs = 5000)
         {
             int read = 0;
             while (read < count)
@@ -586,7 +576,7 @@ namespace BciCore
             return true;
         }
 
-        static bool ResyncMagic(Socket socket, int timeoutMs = 2000)
+        static bool ResyncMagic(Socket socket, int timeoutMs = 5000)
         {
             byte prev = 0;
             var  buf  = new byte[1];
@@ -621,3 +611,4 @@ namespace BciCore
         static double UnityElapsed() => (System.Diagnostics.Stopwatch.GetTimestamp() - _epoch) / _freq;
     }
 }
+

@@ -20,6 +20,7 @@ namespace LeafGame
         [SerializeField] string backButtonLabel="Back";
         [SerializeField] string timeBoardLabel="TIME";
         [SerializeField] string scoreBoardLabel="SCORE";
+        [SerializeField] string reachedBoardLabel="REACHED COLOR";
 
         bool settingsVisible;
         Texture2D backgroundTexture;
@@ -32,8 +33,8 @@ namespace LeafGame
         GUIStyle aestheticPanelStyle,softPanelStyle,primaryButtonStyle,secondaryButtonStyle,aestheticInputStyle,hudLabelStyle,hudValueStyle;
         Texture2D panelTexture,softPanelTexture,primaryTexture,primaryHoverTexture,secondaryTexture,inputTexture;
         float aestheticStyleScale=-1;
-        int hudCachedSecond=-1,hudCachedResultCount=-1;
-        string hudTimeValue="00:00",hudScoreValue="0 / 0";
+        int hudCachedSecond=-1,hudCachedResultCount=-1,hudCachedReachCount=-1;
+        string hudTimeValue="00:00",hudScoreValue="0 / 0",hudReachedValue="0";
 
         void InitializeAestheticPresentation()
         {
@@ -199,7 +200,8 @@ namespace LeafGame
                 GUI.Box(card,GUIContent.none,aestheticPanelStyle);
                 int completed=Math.Min(trialIndex,trials==null?0:trials.Count);
                 double mean=accuracyResults.Count==0?0:(double)accuracyResults.FindAll(a=>a).Count/accuracyResults.Count;
-                GUI.Label(new Rect(card.x+24*u,card.y+28*u,card.width-48*u,card.height-56*u),$"{completedTitle}\n\nAccuracy  {100*mean:F0}%\n\nTrials completed  {completed}",titleStyle);
+                GUI.Label(new Rect(card.x+24*u,card.y+28*u,card.width-48*u,card.height-56*u),$"{completedTitle}\n\nAccuracy  {100*mean:F0}%\nReached color  {colorReachCount}\nTrials completed  {completed}",titleStyle);
+                if(sharedAppManaged&&GUI.Button(new Rect(card.center.x-150*u,card.yMax-68*u,300*u,48*u),"Back to games",secondaryButtonStyle))ReturnToSharedLauncher();
             }
             else if(state==AppState.Fatal)
             {
@@ -289,9 +291,9 @@ namespace LeafGame
         void DrawGameplayHud()
         {
             Rect safe=SafeAreaTopLeft();float u=UiScale();
-            float tileW=Mathf.Clamp(166*u,132*u,safe.width*0.23f),tileH=72*u,gap=10*u;
-            float x=safe.xMax-2*tileW-gap-14*u,y=safe.y+12*u;
-            if(x<safe.x+8*u){tileW=Mathf.Max(118*u,(safe.width-gap-28*u)*0.5f);x=safe.xMax-2*tileW-gap-10*u;}
+            float tileW=Mathf.Clamp(166*u,112*u,safe.width*0.20f),tileH=72*u,gap=10*u;
+            float x=safe.xMax-3*tileW-2*gap-14*u,y=safe.y+12*u;
+            if(x<safe.x+8*u){tileW=Mathf.Max(96*u,(safe.width-2*gap-28*u)/3f);x=safe.xMax-3*tileW-2*gap-10*u;}
             int seconds=Mathf.Max(0,Mathf.FloorToInt((float)Elapsed));
             if(seconds!=hudCachedSecond){hudCachedSecond=seconds;hudTimeValue=$"{seconds/60:00}:{seconds%60:00}";}
             if(accuracyResults.Count!=hudCachedResultCount)
@@ -300,8 +302,10 @@ namespace LeafGame
                 int correct=0;for(int i=0;i<accuracyResults.Count;i++)if(accuracyResults[i])correct++;
                 hudScoreValue=$"{correct} / {accuracyResults.Count}";
             }
+            if(colorReachCount!=hudCachedReachCount){hudCachedReachCount=colorReachCount;hudReachedValue=colorReachCount.ToString();}
             DrawHudTile(new Rect(x,y,tileW,tileH),timeBoardLabel,hudTimeValue);
             DrawHudTile(new Rect(x+tileW+gap,y,tileW,tileH),scoreBoardLabel,hudScoreValue);
+            DrawHudTile(new Rect(x+2*(tileW+gap),y,tileW,tileH),reachedBoardLabel,hudReachedValue);
         }
 
         void DrawHudTile(Rect rect,string label,string value)

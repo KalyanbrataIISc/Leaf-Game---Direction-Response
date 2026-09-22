@@ -181,6 +181,10 @@ namespace LeafGame
         [SerializeField] string participant="000";
         [SerializeField] string block="000";
 
+        [NonSerialized] bool sharedAppManaged;
+        [NonSerialized] bool sharedEnableBciLogging=true;
+        [NonSerialized] Action sharedReturnToLauncher;
+
         AppState state=AppState.Setup;
         LeafVisualRenderer visuals;
         ITriggerSender triggers;
@@ -210,6 +214,7 @@ namespace LeafGame
         readonly List<DroppedFrameRow> droppedRows=new List<DroppedFrameRow>(32);
         readonly List<SsvepTraceRow> ssvepRows=new List<SsvepTraceRow>(2048);
         readonly List<bool> accuracyResults=new List<bool>(24);
+        int colorReachCount;
         Vector2 touchStart;
         bool touchTracking;
         readonly List<RuntimeSetting> runtimeSettings=new List<RuntimeSetting>(128);
@@ -246,6 +251,17 @@ namespace LeafGame
             InitializeRuntimeSettings();
             InitializeAestheticPresentation();
             StartCoroutine(CaptureFrameEndClock());
+            if(sharedAppManaged)ApplySettingsAndContinue();
+        }
+
+        /// <summary>Called by the Feature Attention Games launcher before this component starts.</summary>
+        public void ConfigureSharedLaunch(string participantNumber,string sessionNumber,bool enableBciLogging=true,Action returnToLauncher=null)
+        {
+            participant=string.IsNullOrWhiteSpace(participantNumber)?"000":participantNumber.Trim();
+            block=string.IsNullOrWhiteSpace(sessionNumber)?"000":sessionNumber.Trim();
+            sharedEnableBciLogging=enableBciLogging;
+            sharedReturnToLauncher=returnToLauncher;
+            sharedAppManaged=true;
         }
 
         IEnumerator CaptureFrameEndClock()
@@ -281,7 +297,7 @@ namespace LeafGame
             if(nfSourceType==NfSourceType.BciCore)
             {
                 // BciCore: start the in-process TCP server and wire BciCoreTriggerSender (TCP + UDP fallback).
-                BciServer.StartServer();
+                BciServer.StartServer(enableLogging:sharedEnableBciLogging);
                 triggers=new BciCoreTriggerSender(nfTcpHost.Trim(),triggerPort);
                 triggers.Send("reset",resetTrigger);
             }
@@ -355,7 +371,7 @@ namespace LeafGame
         {
             if(state==AppState.Trial)triggers?.Send("trialstop",trialStopTrigger);
             if(_calibScreen!=null){Destroy(_calibScreen);_calibScreen=null;}
-            if(nfSourceType==NfSourceType.BciCore)BciServer.StopServer();
+            if(runtimeInitialized&&nfSourceType==NfSourceType.BciCore)BciServer.StopServer();
             visuals?.Dispose();nfReader?.Dispose();triggers?.Dispose();DisposeAestheticPresentation();
         }
 
@@ -391,7 +407,7 @@ namespace LeafGame
                         _calibScreen.OnBackPressed=()=>{
                             if(_calibScreen!=null){Destroy(_calibScreen);_calibScreen=null;}
                             BciServer.ExitCalibrationMode();
-                            state=AppState.Setup;
+                            if(sharedAppManaged)ReturnToSharedLauncher();else state=AppState.Setup;
                         };
                     }
                 }
@@ -418,6 +434,7 @@ namespace LeafGame
                 int seed=useFixedRandomSeed?fixedRandomSeed:unchecked(Environment.TickCount*397);
                 if(mixParticipantAndBlockIntoSeed)seed=unchecked(seed^participant.GetHashCode()^block.GetHashCode());
                 rng=new System.Random(seed);
+                colorReachCount=0;
                 nfReader?.Dispose();nfReader=null;
                 nfConnectionStatus="";nfStallWarned=false;
                 if(nfSourceType==NfSourceType.Tcp)
@@ -681,7 +698,7 @@ namespace LeafGame
             }
             else if(which=="cue"){cueOnsetTime=Elapsed;triggers.Send("cueonset",cueOnsetTrigger);}
             else if(which=="green"){if(double.IsNaN(firstGreenTime))firstGreenTime=Elapsed;}
-            else{colorOnsetClock=MonotonicClock.Now;colorOnsetTime=Elapsed;colorOnsetCommitted=true;triggers.Send("success",successTrigger);}
+            else{colorOnsetClock=MonotonicClock.Now;colorOnsetTime=Elapsed;colorOnsetCommitted=true;colorReachCount++;triggers.Send("success",successTrigger);}
         }
 
         void QueueFinish(){if(finishQueued)return;finishQueued=true;StartCoroutine(FinishAfterPresentation());}
@@ -698,6 +715,14 @@ namespace LeafGame
         void UpdateIti(){itiRemaining--;if(itiRemaining<=0)StartTrial();}
         void ShowSummary(){state=AppState.Summary;visuals.ClearLeaves();visuals.SetCueVisible(false,Color.clear);}
         void Fatal(string message){fatalMessage=message;state=AppState.Fatal;visuals?.ClearLeaves();visuals?.SetCueVisible(false,Color.clear);Debug.LogError(message);}
+
+        void ReturnToSharedLauncher()
+        {
+            if(!sharedAppManaged)return;
+            Action callback=sharedReturnToLauncher;
+            callback?.Invoke();
+            Destroy(gameObject);
+        }
 
         bool TryGetDirection(out Direction4 d)
         {

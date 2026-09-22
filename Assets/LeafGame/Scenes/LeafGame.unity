@@ -129,8 +129,10 @@ GameObject:
   m_Component:
   - component: {fileID: 234429827}
   - component: {fileID: 234429826}
+  - component: {fileID: 234429829}
+  - component: {fileID: 234429828}
   m_Layer: 0
-  m_Name: Leaf Game Controller
+  m_Name: Feature Attention Games
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -143,7 +145,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 234429825}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 666fc69aef0a44741b0db72c653dda2a, type: 3}
   m_Name: 
@@ -161,6 +163,7 @@ MonoBehaviour:
   backButtonLabel: Back
   timeBoardLabel: TIME
   scoreBoardLabel: SCORE
+  reachedBoardLabel: REACHED COLOR
   trialsPerBlock: 24
   cueC1Probability: 0.5
   useFixedRandomSeed: 0
@@ -311,6 +314,86 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &234429828
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 234429825}
+  m_Enabled: 0
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c3f851d6525999f48a700cb0d50d1664, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PaddleGame.PaddleGameController
+  trialsPerSession: 24
+  useFixedRandomSeed: 0
+  fixedRandomSeed: 918273
+  preSpawnDelaySec: 2
+  maxTrialDurationSec: 10
+  feedbackDurationSec: 2
+  traceLogIntervalSec: 0.1
+  fieldMarginPx: 0
+  paddleWidthPx: 900
+  paddleHeightPx: 200
+  paddleBottomMarginPx: 50
+  paddleBorderPx: 3
+  paddleGratingWidthPx: 300
+  gratingBarWidthPx: 14
+  edgeInsetPx: 20
+  edgeLineThicknessPx: 4
+  hudHeightPx: 80
+  paddleNfGainPxPerSec: 600
+  paddleMaxSpeedPxPerSec: 600
+  paddleNfDeadzone: 0.02
+  allowKeyboardPaddle: 1
+  keyboardPaddleSpeedPxPerSec: 600
+  dataFolderName: data
+  gratingLeftFreqHz: 17
+  gratingRightFreqHz: 19
+  targetFrameRate: 120
+  verticalSyncCount: 1
+  resetTrigger: 0
+  trialStartTrigger: 20
+  trialStopTrigger: 30
+  udpTriggerPort: 5007
+  udpTriggerHost: 10.36.17.144
+  backgroundColor: {r: 0.039215688, g: 0.047058824, b: 0.078431375, a: 1}
+  gratingMidColor: {r: 0.5019608, g: 0.5019608, b: 0.5019608, a: 1}
+  leftBarHigh: {r: 0, g: 0.9019608, b: 0.9019608, a: 1}
+  leftBarLow: {r: 0, g: 0.3137255, b: 0.3137255, a: 1}
+  rightBarHigh: {r: 1, g: 0.8627451, b: 0, a: 1}
+  rightBarLow: {r: 0.39215687, g: 0.3137255, b: 0, a: 1}
+  paddleBodyColor: {r: 0.11764706, g: 0.11764706, b: 0.23529412, a: 1}
+  paddleBorderColor: {r: 0, g: 0.7058824, b: 0.8627451, a: 1}
+  edgeLineColor: {r: 0.78431374, g: 0.78431374, b: 0.78431374, a: 1}
+  hudColor: {r: 0.8627451, g: 0.8627451, b: 1, a: 1}
+  readyColor: {r: 0, g: 1, b: 0.78431374, a: 1}
+  successColor: {r: 0, g: 1, b: 0, a: 1}
+  failureColor: {r: 1, g: 0, b: 0, a: 1}
+  instructionsText: 'INSTRUCTIONS
+
+
+    Move the paddle toward the edge shown by
+    the arrow. Focus on the left or right flickering end of the paddle to steer it.
+
+
+    Reach
+    the cued edge before time runs out. Reaching the opposite edge ends the trial
+    as a failure.'
+  beginButtonLabel: Begin session
+--- !u!114 &234429829
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 234429825}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9093e914fd3528b43b687669b549dac3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FeatureAttention.FeatureAttentionAppController
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

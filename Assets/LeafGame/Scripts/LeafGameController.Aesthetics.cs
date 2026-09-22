@@ -194,6 +194,26 @@ namespace LeafGame
                 float buttonW=Mathf.Min(330*u,safe.width*0.52f);
                 if(GUI.Button(new Rect(safe.center.x-buttonW*0.5f,safe.yMax-74*u,buttonW,58*u),beginBlockButtonLabel,primaryButtonStyle))BeginBlock();
             }
+            else if(state==AppState.Exporting)
+            {
+                Rect card=new Rect(safe.center.x-Mathf.Min(380*u,safe.width*0.43f),safe.center.y-140*u,Mathf.Min(760*u,safe.width*0.86f),280*u);
+                GUI.Box(card,GUIContent.none,aestheticPanelStyle);
+                GUI.Label(new Rect(card.x+24*u,card.y+28*u,card.width-48*u,40*u),"Saving & Converting Session Data...",titleStyle);
+                GUI.Label(new Rect(card.x+24*u,card.y+76*u,card.width-48*u,36*u),exportStatusMessage,centerStyle);
+
+                float barW=card.width-64*u;float barH=22*u;
+                Rect barBg=new Rect(card.x+32*u,card.y+130*u,barW,barH);
+                Color prevCol=GUI.color;
+                GUI.color=new Color(0.12f,0.16f,0.24f);
+                GUI.DrawTexture(barBg,Texture2D.whiteTexture);
+
+                Rect barFill=new Rect(barBg.x,barBg.y,barW*Mathf.Clamp01(exportProgressFraction),barH);
+                GUI.color=new Color(0.18f,0.82f,0.42f);
+                GUI.DrawTexture(barFill,Texture2D.whiteTexture);
+                GUI.color=prevCol;
+
+                GUI.Label(new Rect(card.x+32*u,card.y+160*u,card.width-64*u,28*u),$"{Mathf.RoundToInt(exportProgressFraction*100)}%",hudLabelStyle);
+            }
             else if(state==AppState.Summary)
             {
                 Rect card=new Rect(safe.center.x-Mathf.Min(380*u,safe.width*0.43f),safe.center.y-170*u,Mathf.Min(760*u,safe.width*0.86f),340*u);
@@ -306,6 +326,29 @@ namespace LeafGame
             DrawHudTile(new Rect(x,y,tileW,tileH),timeBoardLabel,hudTimeValue);
             DrawHudTile(new Rect(x+tileW+gap,y,tileW,tileH),scoreBoardLabel,hudScoreValue);
             DrawHudTile(new Rect(x+2*(tileW+gap),y,tileW,tileH),reachedBoardLabel,hudReachedValue);
+
+            // Stop button on top-left of gameplay HUD
+            float stopW = 140 * u;
+            float stopH = 40 * u;
+            Rect stopRect = new Rect(safe.x + 14 * u, safe.y + 12 * u, stopW, stopH);
+            string stopText = stopConfirmCountdown > 0 ? "Confirm Stop?" : "Stop Session";
+            Color prevColor = GUI.color;
+            GUI.color = stopConfirmCountdown > 0 ? new Color(1f, 0.35f, 0.35f) : new Color(0.9f, 0.5f, 0.5f);
+            if (GUI.Button(stopRect, stopText, secondaryButtonStyle))
+            {
+                if (stopConfirmCountdown > 0)
+                {
+                    stopConfirmCountdown = 0;
+                    StartSessionExport(() => {
+                        if (sharedAppManaged) ReturnToSharedLauncher(); else state = AppState.Setup;
+                    });
+                }
+                else
+                {
+                    stopConfirmCountdown = 3.0f;
+                }
+            }
+            GUI.color = prevColor;
         }
 
         void DrawHudTile(Rect rect,string label,string value)

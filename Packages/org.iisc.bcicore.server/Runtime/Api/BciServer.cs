@@ -13,6 +13,7 @@
 // ============================================================================
 using System;
 using System.IO;
+using System.Threading.Tasks;
 using UnityEngine;
 
 namespace BciCore
@@ -35,7 +36,8 @@ namespace BciCore
 
         // ── Session logger ────────────────────────────────────────────────────
         static CsvSessionLogger _logger;
-        public static string CurrentSessionDir => _logger?.SessionDir;
+        public static string CurrentSessionDir => _logger?.SessionDir ?? LastSessionDir;
+        public static string LastSessionDir { get; private set; }
         static bool             _enableLogging = true;
         static string           _logDir;
         // Buffered alpha for features.csv correlation (seq → alpha[])
@@ -180,11 +182,33 @@ namespace BciCore
         {
             _listener?.Dispose();
             _listener = null;
-            _logger?.Dispose();
-            _logger = null;
+            if (_logger != null)
+            {
+                LastSessionDir = _logger.SessionDir;
+                _logger.Dispose();
+                _logger = null;
+            }
             IsUsingProcessedSignals = false;
             State = ConnectionState.Disconnected;
             Debug.Log("[BciCore] Server stopped.");
+        }
+
+        /// <summary>
+        /// Asynchronously converts all binary logs (.bin) in the current/last session directory to CSV.
+        /// </summary>
+        public static async Task ConvertCurrentSessionToCsvAsync(Action<float, string> onProgress = null)
+        {
+            string dir = CurrentSessionDir ?? LastSessionDir;
+            if (!string.IsNullOrEmpty(dir))
+            {
+                if (_logger != null)
+                {
+                    LastSessionDir = _logger.SessionDir;
+                    _logger.Dispose();
+                    _logger = null;
+                }
+                await BinToCsvConverter.ConvertSessionAsync(dir, onProgress);
+            }
         }
 
         // ── Internal callbacks (main thread after dispatch) ───────────────────

@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
@@ -19,7 +20,7 @@ namespace LeafGame
     {
         // AppState.Calibration is inserted between Setup and Instructions when
         // nfSourceType == NfSourceType.BciCore.  All other paths skip it.
-        enum AppState { Setup, Calibration, Instructions, Trial, Iti, Summary, Fatal }
+        enum AppState { Setup, Calibration, Instructions, Trial, Iti, Summary, Fatal, Exporting }
 
         sealed class RuntimeSetting
         {
@@ -375,10 +376,67 @@ namespace LeafGame
             visuals?.Dispose();nfReader?.Dispose();triggers?.Dispose();DisposeAestheticPresentation();
         }
 
+        float stopConfirmCountdown;
+        float exportProgressFraction;
+        string exportStatusMessage = "";
+        Action onExportCompleted;
+
+        public void StartSessionExport(Action onDone)
+        {
+            if (state == AppState.Exporting) return;
+            state = AppState.Exporting;
+            onExportCompleted = onDone;
+            exportProgressFraction = 0.05f;
+            exportStatusMessage = "Flushing binary logs...";
+            visuals?.ClearLeaves();
+            visuals?.SetCueVisible(false, Color.clear);
+            if (triggers != null)
+            {
+                triggers.Send("trialstop", trialStopTrigger);
+                triggers.Dispose();
+                triggers = null;
+            }
+
+            if (nfSourceType == NfSourceType.BciCore)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await BciServer.ConvertCurrentSessionToCsvAsync((p, status) =>
+                        {
+                            exportProgressFraction = p;
+                            exportStatusMessage = status;
+                        });
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError($"[LeafGame] Export failed: {e.Message}");
+                    }
+                    finally
+                    {
+                        MainThreadDispatcher.Enqueue(() =>
+                        {
+                            Action cb = onExportCompleted;
+                            onExportCompleted = null;
+                            cb?.Invoke();
+                        });
+                    }
+                });
+            }
+            else
+            {
+                onExportCompleted?.Invoke();
+                onExportCompleted = null;
+            }
+        }
+
         void Update()
         {
             UpdateAestheticInput();
-            if(escapeEndsBlock&&state!=AppState.Setup&&EscapePressed()){if(state==AppState.Trial){triggers?.Send("trialstop",trialStopTrigger);finishQueued=true;}state=AppState.Summary;visuals?.ClearLeaves();visuals?.SetCueVisible(false,Color.clear);return;}
+            if(stopConfirmCountdown > 0) stopConfirmCountdown -= Time.unscaledDeltaTime;
+            if(state == AppState.Exporting) return;
+            if(escapeEndsBlock&&state!=AppState.Setup&&EscapePressed()){if(state==AppState.Trial){triggers?.Send("trialstop",trialStopTrigger);finishQueued=true;}StartSessionExport(()=>ShowSummary());return;}
             if(state==AppState.Trial&&!finishQueued)UpdateTrial();
             else if(state==AppState.Iti)UpdateIti();
         }
@@ -573,7 +631,7 @@ namespace LeafGame
 
         void StartTrial()
         {
-            if(trialIndex>=trials.Count){ShowSummary();return;}
+            if(trialIndex>=trials.Count){StartSessionExport(()=>ShowSummary());return;}
             RefreshPresentationTiming();
             trialRefreshHz=refreshHz;
             trial=trials[trialIndex];trialFrame=0;finishQueued=false;colorsRevealed=false;colorOnsetCommitted=false;

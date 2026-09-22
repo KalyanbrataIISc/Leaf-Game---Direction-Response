@@ -294,6 +294,7 @@ namespace BciCore
         {
             // Per-connection stats counters
             long gapsRaw = 0, gapsProc = 0, badFrames = 0;
+            long peakQueueDepth = 0;
             uint? expRaw = null, expProc = null;
 
             long   frameCnt       = 0;
@@ -318,6 +319,8 @@ namespace BciCore
                     }
                 }
                 catch { break; }
+
+                peakQueueDepth = Math.Max(peakQueueDepth, q.Count);
 
                 var (ftype, seq, payload) = frame;
                 int plen = payload.Length;
@@ -520,12 +523,14 @@ namespace BciCore
                         BoardBad   = hBoardBad,
                         BoardMiss  = hBoardMiss,
                         BoardDspMax = hBoardDspMax,
+                        MaxFrameQueueDepth = (int)peakQueueDepth,
                     };
                     MainThreadDispatcher.Enqueue(() => OnStats?.Invoke(snap));
 
-                    lastSampleSeq = curSampleSeq;
-                    lastPerfSec   = now;
-                    frameCnt      = 0;
+                    lastSampleSeq  = curSampleSeq;
+                    lastPerfSec    = now;
+                    frameCnt       = 0;
+                    peakQueueDepth = 0;
                 }
             }
         }

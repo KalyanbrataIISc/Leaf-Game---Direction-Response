@@ -73,6 +73,7 @@ namespace BciCore
         public uint BoardBad;
         public uint BoardMiss;
         public uint BoardDspMax;   // peak DSP burst µs (from HEALTH)
+        public int MaxFrameQueueDepth;   // peak frameQ.Count observed this second
     }
 
     // ── ML result (ML frame, type 0x09) ──────────────────────────────────────

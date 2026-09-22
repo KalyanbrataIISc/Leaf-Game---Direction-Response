@@ -21,6 +21,7 @@
 //  any subset of channels independently for both Raw and FFT views.
 // ============================================================================
 using System;
+using System.Threading.Tasks;
 using UnityEngine;
 using BciCore;
 
@@ -201,9 +202,85 @@ namespace LeafGame
 
         // ── IMGUI ─────────────────────────────────────────────────────────────
 
+        bool _isExporting = false;
+        float _exportProgress = 0f;
+        string _exportStatus = "Preparing export...";
+
+        void StartStopAndExport()
+        {
+            if (_isExporting) return;
+            _isExporting = true;
+            _exportProgress = 0.05f;
+            _exportStatus = "Flushing binary recordings...";
+
+            BciServer.ExitCalibrationMode();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await BciServer.ConvertCurrentSessionToCsvAsync((p, status) =>
+                    {
+                        _exportProgress = p;
+                        _exportStatus = status;
+                    });
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[BciCore] Calibration export failed: {e.Message}");
+                }
+                finally
+                {
+                    MainThreadDispatcher.Enqueue(() =>
+                    {
+                        _isExporting = false;
+                        OnBackPressed?.Invoke();
+                    });
+                }
+            });
+        }
+
+        void DrawExportModal(float s)
+        {
+            Rect full = new Rect(0, 0, Screen.width, Screen.height);
+            GUI.color = new Color(0.04f, 0.05f, 0.08f, 0.94f);
+            GUI.DrawTexture(full, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            float cardW = Mathf.Min(620f * s, Screen.width * 0.88f);
+            float cardH = 220f * s;
+            Rect card = new Rect((Screen.width - cardW) * 0.5f, (Screen.height - cardH) * 0.5f, cardW, cardH);
+
+            GUI.color = new Color(0.12f, 0.15f, 0.22f);
+            GUI.DrawTexture(card, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            GUI.Label(new Rect(card.x + 24 * s, card.y + 24 * s, card.width - 48 * s, 36 * s), "Saving & Converting Session Data to CSV...", _titleStyle);
+            GUI.Label(new Rect(card.x + 24 * s, card.y + 68 * s, card.width - 48 * s, 30 * s), _exportStatus, _bodyStyle);
+
+            float barW = card.width - 48 * s;
+            float barH = 20 * s;
+            Rect barBg = new Rect(card.x + 24 * s, card.y + 110 * s, barW, barH);
+            GUI.color = new Color(0.06f, 0.08f, 0.14f);
+            GUI.DrawTexture(barBg, Texture2D.whiteTexture);
+
+            Rect barFill = new Rect(barBg.x, barBg.y, barW * Mathf.Clamp01(_exportProgress), barH);
+            GUI.color = new Color(0.18f, 0.82f, 0.42f);
+            GUI.DrawTexture(barFill, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            GUI.Label(new Rect(card.x + 24 * s, card.y + 140 * s, card.width - 48 * s, 26 * s), $"{Mathf.RoundToInt(_exportProgress * 100)}%", _labelStyle);
+            GUI.Label(new Rect(card.x + 24 * s, card.y + 172 * s, card.width - 48 * s, 26 * s), "Please wait, returning to Setup...", _labelStyle);
+        }
+
         void OnGUI()
         {
             float s = GetUiScale();
+            BuildStyles(s);
+            if (_isExporting)
+            {
+                DrawExportModal(s);
+                return;
+            }
             BuildStyles(s);
 
             Rect full = new Rect(0, 0, Screen.width, Screen.height);
@@ -298,6 +375,8 @@ namespace LeafGame
             Row("SSVEP P rel|D|:", "0.00e+00");
             Row("Free Heap:", _stats.FreeHeap > 0 ? _stats.FreeHeap.ToString("N0") : "—");
             Row("Curr Marker:", _stats.Marker.ToString());
+            Row("Queue Depth (pk):", _stats.MaxFrameQueueDepth.ToString(),
+                _stats.MaxFrameQueueDepth > 50 ? new Color(1f, 0.35f, 0.35f) : (_stats.MaxFrameQueueDepth > 20 ? new Color(1f, 0.85f, 0.2f) : Color.white));
 
             y += Mathf.Round(8f * s);
             SectionHeader("PACKET LOSS", new Color(0.30f, 0.95f, 0.55f));
@@ -899,13 +978,22 @@ namespace LeafGame
             float bh  = Mathf.Round(40f * s);
 
             // Back button (left aligned)
-            float backW = Mathf.Round(180f * s);
+            float backW = Mathf.Round(150f * s);
             Rect backBtn = new Rect(r.x + pad, r.y + (r.height - bh) * 0.5f, backW, bh);
             GUI.color = new Color(0.7f, 0.75f, 0.85f);
-            if (GUI.Button(backBtn, "<  Back to Setup", _btnStyle))
+            if (GUI.Button(backBtn, "<  Back", _btnStyle))
             {
                 BciServer.ExitCalibrationMode();
                 OnBackPressed?.Invoke();
+            }
+
+            // Stop & Export button (next to Back)
+            float stopW = Mathf.Round(180f * s);
+            Rect stopBtn = new Rect(backBtn.xMax + Mathf.Round(12f * s), r.y + (r.height - bh) * 0.5f, stopW, bh);
+            GUI.color = new Color(1f, 0.42f, 0.42f);
+            if (GUI.Button(stopBtn, "Stop & Export CSV", _btnStyle))
+            {
+                StartStopAndExport();
             }
 
             // Proceed button (center aligned)

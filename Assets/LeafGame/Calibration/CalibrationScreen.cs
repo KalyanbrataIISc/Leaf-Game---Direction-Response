@@ -160,12 +160,18 @@ namespace LeafGame
 
         void Update()
         {
+            float fs = BciServer.Config.Fs > 0 ? BciServer.Config.Fs : 250f;
+            if (fs >= 1000f)
+            {
+                if (_tab == Tab.Fft) _tab = Tab.Raw;
+                return;
+            }
+
             if (_tab != Tab.Fft) return;
             _fftTimer -= Time.unscaledDeltaTime;
             if (_fftTimer > 0) return;
             _fftTimer = fftUpdateIntervalSec;
 
-            float fs = BciServer.Config.Fs > 0 ? BciServer.Config.Fs : 250f;
 
             for (int c = 0; c < _numCh; c++)
             {
@@ -324,14 +330,26 @@ namespace LeafGame
                     _tab == Tab.Raw ? _btnActiveStyle : _btnStyle))
                 _tab = Tab.Raw;
 
-            if (GUI.Button(new Rect(r.x + rawBtnW + Mathf.Round(12f * s), btnY, fftBtnW, btnH), "FFT Spectrum",
-                    _tab == Tab.Fft ? _btnActiveStyle : _btnStyle))
-                _tab = Tab.Fft;
+            float fs = BciServer.Config.Fs > 0 ? BciServer.Config.Fs : 250f;
+            bool fftAllowed = fs < 1000f;
+
+            if (fftAllowed)
+            {
+                if (GUI.Button(new Rect(r.x + rawBtnW + Mathf.Round(12f * s), btnY, fftBtnW, btnH), "FFT Spectrum",
+                        _tab == Tab.Fft ? _btnActiveStyle : _btnStyle))
+                    _tab = Tab.Fft;
+            }
+            else
+            {
+                GUI.enabled = false;
+                GUI.Button(new Rect(r.x + rawBtnW + Mathf.Round(12f * s), btnY, Mathf.Round(200f * s), btnH), "FFT Disabled (>=1000 SPS)", _btnStyle);
+                GUI.enabled = true;
+            }
 
             Rect content = new Rect(r.x, r.y + tabH, r.width, r.height - tabH);
 
-            if (_tab == Tab.Raw) DrawRawTab(content, s);
-            else                 DrawFftTab(content, s);
+            if (_tab == Tab.Raw || !fftAllowed) DrawRawTab(content, s);
+            else                                 DrawFftTab(content, s);
         }
 
         // ── Multi-Channel Raw Tab ─────────────────────────────────────────────

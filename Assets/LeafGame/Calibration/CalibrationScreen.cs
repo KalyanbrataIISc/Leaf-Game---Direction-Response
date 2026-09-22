@@ -34,7 +34,7 @@ namespace LeafGame
 
         // ── Inspector tweaks ──────────────────────────────────────────────────
         [Header("Display")]
-        [SerializeField] float fftUpdateIntervalSec = 0.08f;    // ~12.5 Hz (matches PyQt refresh)
+        [SerializeField] float fftUpdateIntervalSec = 0.25f;    // ~4 Hz (throttled from 12.5 Hz to eliminate GC/CPU stalls)
         [SerializeField] int   fftWindowSamples     = 500;      // 500 samples (2 s at 250 SPS, matches FFT_NPTS in bci_gui_v2.py)
         [SerializeField] float rawTimeSpanSec       = 5f;       // Initial raw view width in seconds
         [SerializeField] float defaultYRangeUv      = 200f;

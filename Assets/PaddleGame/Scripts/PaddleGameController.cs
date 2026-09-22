@@ -6,6 +6,7 @@ using BciCore;
 using LeafGame;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.Serialization;
 
 namespace PaddleGame
 {
@@ -19,7 +20,10 @@ namespace PaddleGame
         enum GameState { WaitingForLaunch, Calibration, Instructions, Preview, Trial, Feedback, Summary, Fatal }
 
         [Header("Experiment Design")]
-        [SerializeField, Min(1)] int trialsPerSession = 24;
+        [Tooltip("Must be even so the session contains exactly the same number of left and right cues.")]
+        [SerializeField, Min(2)] int trialsPerSession = 24;
+        [Tooltip("Maximum allowed run of identical cue directions in the pseudorandom schedule (1-3).")]
+        [SerializeField, Range(1, 3)] int maxConsecutiveDirectionTrials = 3;
         [SerializeField] bool useFixedRandomSeed;
         [SerializeField] int fixedRandomSeed = 918273;
 
@@ -57,7 +61,11 @@ namespace PaddleGame
 
         [Header("Trigger Codes")]
         [SerializeField, Range(0, 255)] int resetTrigger;
-        [SerializeField, Range(0, 255)] int trialStartTrigger = 20;
+        [Tooltip("Trial-start marker sent when the direction cue points left.")]
+        [FormerlySerializedAs("trialStartTrigger")]
+        [SerializeField, Range(0, 255)] int trialStartLeftTrigger = 20;
+        [Tooltip("Trial-start marker sent when the direction cue points right.")]
+        [SerializeField, Range(0, 255)] int trialStartRightTrigger = 21;
         [SerializeField, Range(0, 255)] int trialStopTrigger = 30;
         [SerializeField, Range(1, 65535)] int udpTriggerPort = 5007;
         [SerializeField] string udpTriggerHost = "10.36.17.144";
@@ -96,6 +104,7 @@ namespace PaddleGame
         GUIStyle titleStyle, bodyStyle, buttonStyle, hudStyle, arrowStyle;
         bool runtimeStarted;
         int trialIndex, successCount, targetSide, droppedFrames;
+        int[] trialSides;
         float paddleCenterX, lastVelocity, nfLeft, nfRight;
         double experimentT0, stateStartedAt, trialStartedAt, phaseT0, lastTraceAt, lastFrameAt;
         string feedbackText = "";
@@ -108,6 +117,32 @@ namespace PaddleGame
             sharedEnableBciLogging = enableBciLogging;
             sharedReturnToLauncher = returnToLauncher;
             sharedLaunchConfigured = true;
+        }
+
+        public bool ValidateSettings(out string error)
+        {
+            if (trialsPerSession < 2)
+            {
+                error = "Paddle Trials Per Session must be at least 2.";
+                return false;
+            }
+            if ((trialsPerSession & 1) != 0)
+            {
+                error = "Paddle Trials Per Session must be even so left and right cues can be exactly balanced.";
+                return false;
+            }
+            if (maxConsecutiveDirectionTrials < 1 || maxConsecutiveDirectionTrials > 3)
+            {
+                error = "Paddle Max Consecutive Direction Trials must be between 1 and 3.";
+                return false;
+            }
+            if (trialStartLeftTrigger == trialStartRightTrigger)
+            {
+                error = "Paddle left and right trial-start triggers must be different.";
+                return false;
+            }
+            error = "";
+            return true;
         }
 
         void Start()
@@ -182,14 +217,25 @@ namespace PaddleGame
 
         void BeginSession()
         {
+            if (!ValidateSettings(out string settingsError))
+            {
+                Fatal(settingsError);
+                return;
+            }
             trialIndex = 0;
             successCount = 0;
+            trialSides = BuildBalancedTrialSides(trialsPerSession);
             StartTrialPreview(Time.realtimeSinceStartupAsDouble);
         }
 
         void StartTrialPreview(double now)
         {
-            targetSide = rng.Next(0, 2) == 0 ? -1 : 1;
+            if (trialSides == null || trialIndex < 0 || trialIndex >= trialSides.Length)
+            {
+                Fatal("The Paddle direction schedule is unavailable for this trial.");
+                return;
+            }
+            targetSide = trialSides[trialIndex];
             paddleCenterX = Screen.width * 0.5f;
             nfLeft = nfRight = lastVelocity = 0f;
             droppedFrames = 0;
@@ -200,13 +246,50 @@ namespace PaddleGame
             state = GameState.Preview;
         }
 
+        int[] BuildBalancedTrialSides(int count)
+        {
+            var sides = new int[count];
+            int half = count / 2;
+            for (int i = 0; i < count; i++) sides[i] = i < half ? -1 : 1;
+
+            const int MaxShuffleAttempts = 1024;
+            for (int attempt = 0; attempt < MaxShuffleAttempts; attempt++)
+            {
+                for (int i = sides.Length - 1; i > 0; i--)
+                {
+                    int j = rng.Next(i + 1);
+                    int swap = sides[i];
+                    sides[i] = sides[j];
+                    sides[j] = swap;
+                }
+                if (HasAcceptableDirectionRuns(sides)) return sides;
+            }
+
+            bool startLeft = rng.Next(0, 2) == 0;
+            for (int i = 0; i < count; i++) sides[i] = ((i & 1) == 0) == startLeft ? -1 : 1;
+            return sides;
+        }
+
+        bool HasAcceptableDirectionRuns(int[] sides)
+        {
+            int runLength = 1;
+            for (int i = 1; i < sides.Length; i++)
+            {
+                runLength = sides[i] == sides[i - 1] ? runLength + 1 : 1;
+                if (runLength > maxConsecutiveDirectionTrials) return false;
+            }
+            return true;
+        }
+
         void BeginTrialMotion(double now)
         {
             trialStartedAt = now;
             phaseT0 = now;
             stateStartedAt = now;
             lastFrameAt = now;
-            triggers.Send("trialstart", trialStartTrigger);
+            bool isLeftCue = targetSide < 0;
+            triggers.Send(isLeftCue ? "trialstart_left" : "trialstart_right",
+                isLeftCue ? trialStartLeftTrigger : trialStartRightTrigger);
             state = GameState.Trial;
         }
 

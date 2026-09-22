@@ -307,7 +307,8 @@ namespace FeatureAttention
         bool ApplyAll()
         {
             validationError = "";
-            return Apply(commonEntries) && Apply(leafEntries) && Apply(paddleEntries);
+            if (!Apply(commonEntries) || !Apply(leafEntries) || !Apply(paddleEntries)) return false;
+            return paddleTemplate.ValidateSettings(out validationError);
         }
 
         bool Apply(List<SettingEntry> entries)

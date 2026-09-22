@@ -70,6 +70,25 @@ namespace LeafGame
             }
         }
 
+        /// <summary>
+        /// Reads both lateralisation channels from the same fresh BCI sample.
+        /// The paddle task needs the signed difference between the pair, so
+        /// reading them atomically avoids consuming freshness on the first
+        /// value before the second value is copied.
+        /// </summary>
+        public bool TryReadPair(out double first, out double second)
+        {
+            lock (_gate)
+            {
+                first = _smi0;
+                second = _smi1;
+                if (_seq == _lastRead) return false;
+                _lastRead = _seq;
+                return !double.IsNaN(first) && !double.IsInfinity(first)
+                    && !double.IsNaN(second) && !double.IsInfinity(second);
+            }
+        }
+
         public void Dispose()
         {
             BciServer.OnNfSample -= OnSample;

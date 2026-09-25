@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -10,6 +11,8 @@ using UnityEngine.Serialization;
 
 namespace PaddleGame
 {
+    public enum PaddleConnectionMode { BciCore, UsbBiosemi }
+
     /// <summary>
     /// Unity implementation of gameBreakoutv7p1_val.m. The two ends of the
     /// paddle are 17/19 Hz contrast-modulated gratings and the fresh BCI pair
@@ -46,6 +49,10 @@ namespace PaddleGame
         [SerializeField, Min(0)] float hudHeightPx = 80f;
 
         [Header("Neurofeedback")]
+        [SerializeField] PaddleConnectionMode connectionMode = PaddleConnectionMode.UsbBiosemi;
+        [SerializeField, Range(1, 65535)] int usbBiosemiPort = 5010;
+        [SerializeField, Min(1)] float usbConnectionTimeoutSec = 10f;
+        [SerializeField, Min(0)] float usbNfStallAbortSec = 5f;
         [SerializeField, Min(0)] float paddleNfGainPxPerSec = 600f;
         [SerializeField, Min(0)] float paddleMaxSpeedPxPerSec = 600f;
         [SerializeField, Min(0)] float paddleNfDeadzone = 0.02f;
@@ -97,8 +104,8 @@ namespace PaddleGame
 
         GameState state = GameState.WaitingForLaunch;
         CalibrationScreen calibration;
-        BciCoreNfReader nfReader;
-        BciCoreTriggerSender triggers;
+        INfPairReader nfReader;
+        ITriggerSender triggers;
         PaddleCsvLogger logger;
         System.Random rng;
         GUIStyle titleStyle, bodyStyle, buttonStyle, hudStyle, arrowStyle;
@@ -107,6 +114,7 @@ namespace PaddleGame
         int[] trialSides;
         float paddleCenterX, lastVelocity, nfLeft, nfRight;
         double experimentT0, stateStartedAt, trialStartedAt, phaseT0, lastTraceAt, lastFrameAt;
+        double lastNfAt;
         string feedbackText = "";
         string fatalMessage = "";
 
@@ -141,6 +149,11 @@ namespace PaddleGame
                 error = "Paddle left and right trial-start triggers must be different.";
                 return false;
             }
+            if (connectionMode == PaddleConnectionMode.UsbBiosemi && (usbBiosemiPort < 1 || usbBiosemiPort > 65535))
+            {
+                error = "Paddle USB Biosemi port must be between 1 and 65535.";
+                return false;
+            }
             error = "";
             return true;
         }
@@ -164,20 +177,48 @@ namespace PaddleGame
                 experimentT0 = Time.realtimeSinceStartupAsDouble;
                 string dataPath = Path.IsPathRooted(dataFolderName) ? dataFolderName : Path.Combine(Application.persistentDataPath, dataFolderName);
                 logger = new PaddleCsvLogger(dataPath, participant, session);
-                BciServer.StartServer(enableLogging: sharedEnableBciLogging);
-                triggers = new BciCoreTriggerSender(udpTriggerHost.Trim(), udpTriggerPort);
-                triggers.Send("reset", resetTrigger);
                 runtimeStarted = true;
-                state = GameState.Calibration;
-                calibration = gameObject.AddComponent<CalibrationScreen>();
-                calibration.OnProceedPressed = ProceedFromCalibration;
-                calibration.OnBackPressed = ReturnToSharedLauncher;
+                if (connectionMode == PaddleConnectionMode.UsbBiosemi)
+                {
+                    var usbLink = new UsbBiosemiLink(usbBiosemiPort, resetTrigger);
+                    triggers = usbLink;
+                    nfReader = usbLink;
+                    state = GameState.WaitingForLaunch;
+                    StartCoroutine(WaitForUsbLink(usbLink));
+                }
+                else
+                {
+                    BciServer.StartServer(enableLogging: sharedEnableBciLogging);
+                    triggers = new BciCoreTriggerSender(udpTriggerHost.Trim(), udpTriggerPort);
+                    triggers.Send("reset", resetTrigger);
+                    state = GameState.Calibration;
+                    calibration = gameObject.AddComponent<CalibrationScreen>();
+                    calibration.OnProceedPressed = ProceedFromCalibration;
+                    calibration.OnBackPressed = ReturnToSharedLauncher;
+                }
             }
             catch (Exception e)
             {
                 Fatal(e.Message);
                 Debug.LogException(e);
             }
+        }
+
+        IEnumerator WaitForUsbLink(UsbBiosemiLink link)
+        {
+            double deadline = Time.realtimeSinceStartupAsDouble + Math.Max(1, usbConnectionTimeoutSec);
+            while (state == GameState.WaitingForLaunch && !link.IsReady &&
+                string.IsNullOrEmpty(link.Error) && Time.realtimeSinceStartupAsDouble < deadline)
+                yield return null;
+            if (state != GameState.WaitingForLaunch) yield break;
+            if (!link.IsReady)
+            {
+                Fatal("Paddle USB Biosemi link has no live NF record. Check the P bridge and its shared-drive path. " +
+                    (string.IsNullOrEmpty(link.Error) ? "Connection timed out." : link.Error));
+                yield break;
+            }
+            lastNfAt = Time.realtimeSinceStartupAsDouble;
+            state = GameState.Instructions;
         }
 
         void ProceedFromCalibration()
@@ -191,6 +232,12 @@ namespace PaddleGame
 
         void Update()
         {
+            if (connectionMode == PaddleConnectionMode.UsbBiosemi && nfReader != null &&
+                state != GameState.WaitingForLaunch && state != GameState.Fatal && !string.IsNullOrEmpty(nfReader.Error))
+            {
+                Fatal("Paddle USB Biosemi link failed: " + nfReader.Error);
+                return;
+            }
             if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame &&
                 state != GameState.Calibration && state != GameState.Summary && state != GameState.Fatal)
             {
@@ -284,6 +331,7 @@ namespace PaddleGame
         void BeginTrialMotion(double now)
         {
             trialStartedAt = now;
+            lastNfAt = now;
             phaseT0 = now;
             stateStartedAt = now;
             lastFrameAt = now;
@@ -310,6 +358,14 @@ namespace PaddleGame
             {
                 nfLeft = (float)freshLeft;
                 nfRight = (float)freshRight;
+                lastNfAt = now;
+            }
+            if (connectionMode == PaddleConnectionMode.UsbBiosemi && usbNfStallAbortSec > 0 &&
+                now - lastNfAt >= usbNfStallAbortSec)
+            {
+                triggers.Send("trialstop", trialStopTrigger);
+                Fatal("No fresh USB Biosemi NF record. Check the P bridge NF count and shared file path.");
+                return;
             }
 
             float signed = nfRight - nfLeft;
@@ -379,14 +435,21 @@ namespace PaddleGame
             logger?.Flush();
             nfReader?.Dispose();
             triggers?.Dispose();
-            BciServer.StopServer();
+            if (connectionMode == PaddleConnectionMode.BciCore) BciServer.StopServer();
         }
 
         void OnGUI()
         {
-            if (state == GameState.Calibration || state == GameState.WaitingForLaunch) return;
+            if (state == GameState.Calibration) return;
             BuildStyles();
             Fill(new Rect(0, 0, Screen.width, Screen.height), Render(backgroundColor));
+
+            if (state == GameState.WaitingForLaunch)
+            {
+                GUI.Label(new Rect(Screen.width * 0.1f, Screen.height * 0.3f, Screen.width * 0.8f, Screen.height * 0.4f),
+                    "Connecting to the P-system USB Biosemi bridge and waiting for NF...", titleStyle);
+                return;
+            }
 
             if (state == GameState.Instructions)
             {

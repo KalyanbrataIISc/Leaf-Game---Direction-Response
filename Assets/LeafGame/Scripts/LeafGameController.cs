@@ -58,8 +58,11 @@ namespace LeafGame
         [SerializeField, Min(32)] int nfPathMaximumCharacters=1024;
         [SerializeField] string nfTcpHost="10.36.17.144";
         [SerializeField, Range(1,65535)] int nfTcpPort=5006;
+        [Header("USB Biosemi (tablet loopback via ADB reverse)")]
+        [SerializeField, Range(1,65535)] int usbBiosemiPort=5010;
         [SerializeField, Min(0.1f)] double nfTcpTimeoutSec=10;
         [SerializeField, Min(0)] double nfStreamStallWarnSec=2;
+        [SerializeField, Min(0)] double usbNfStallAbortSec=5;
         [SerializeField] string dataFolderName="data";
         [SerializeField, Min(0.001f)] double NfTraceIntervalSec=0.1;
         [SerializeField, Min(0)] double NfGreenHoldSec=1;
@@ -88,7 +91,7 @@ namespace LeafGame
         [SerializeField] bool runInBackground=true;
         [SerializeField] bool preventScreenSleep=true;
 
-        [Header("Trigger UDP (uses NF TCP Host)")]
+        [Header("Legacy Trigger UDP (uses NF TCP Host; ignored in USB Biosemi mode)")]
         [SerializeField, Range(1,65535)] int triggerPort=5007;
 
         [Header("Trigger Codes (MATLAB defaults)")]
@@ -243,7 +246,7 @@ namespace LeafGame
                 return Path.IsPathRooted(chosen)?chosen:Path.Combine(Application.persistentDataPath,chosen);
             }
         }
-        string NfDescription=>nfSourceType==NfSourceType.Tcp?$"tcp://{nfTcpHost.Trim()}:{nfTcpPort}":NfPath;
+        string NfDescription=>nfSourceType==NfSourceType.UsbBiosemi?$"USB bridge on 127.0.0.1:{usbBiosemiPort}":nfSourceType==NfSourceType.Tcp?$"tcp://{nfTcpHost.Trim()}:{nfTcpPort}":NfPath;
         string DataPath=>Path.IsPathRooted(dataFolderName)?dataFolderName:Path.Combine(Application.persistentDataPath,dataFolderName);
 
         void Start()
@@ -301,6 +304,12 @@ namespace LeafGame
                 BciServer.StartServer(enableLogging:sharedEnableBciLogging);
                 triggers=new BciCoreTriggerSender(nfTcpHost.Trim(),triggerPort);
                 triggers.Send("reset",resetTrigger);
+            }
+            else if(nfSourceType==NfSourceType.UsbBiosemi)
+            {
+                // The USB link carries both markers and NF on one ordered TCP connection.
+                var usbLink=new UsbBiosemiLink(usbBiosemiPort,resetTrigger);
+                triggers=usbLink;
             }
             else
             {
@@ -434,9 +443,18 @@ namespace LeafGame
         void Update()
         {
             UpdateAestheticInput();
+<<<<<<< Updated upstream
             if(stopConfirmCountdown > 0) stopConfirmCountdown -= Time.unscaledDeltaTime;
             if(state == AppState.Exporting) return;
             if(escapeEndsBlock&&state!=AppState.Setup&&EscapePressed()){if(state==AppState.Trial){triggers?.Send("trialstop",trialStopTrigger);finishQueued=true;}StartSessionExport(()=>ShowSummary());return;}
+=======
+            if(nfSourceType==NfSourceType.UsbBiosemi&&nfReader!=null&&state!=AppState.Setup&&state!=AppState.Fatal&&!string.IsNullOrEmpty(nfReader.Error))
+            {
+                Fatal(nfReader.Error+". Stop this block and check the USB cable and P-system bridge.");
+                return;
+            }
+            if(escapeEndsBlock&&state!=AppState.Setup&&EscapePressed()){if(state==AppState.Trial){triggers?.Send("trialstop",trialStopTrigger);finishQueued=true;}state=AppState.Summary;visuals?.ClearLeaves();visuals?.SetCueVisible(false,Color.clear);return;}
+>>>>>>> Stashed changes
             if(state==AppState.Trial&&!finishQueued)UpdateTrial();
             else if(state==AppState.Iti)UpdateIti();
         }
@@ -495,7 +513,15 @@ namespace LeafGame
                 colorReachCount=0;
                 nfReader?.Dispose();nfReader=null;
                 nfConnectionStatus="";nfStallWarned=false;
-                if(nfSourceType==NfSourceType.Tcp)
+                if(nfSourceType==NfSourceType.UsbBiosemi)
+                {
+                    var usbLink=triggers as UsbBiosemiLink;
+                    if(usbLink==null)throw new InvalidOperationException("The USB Biosemi link was not initialized.");
+                    nfReader=usbLink;sessionStarting=true;
+                    nfConnectionStatus="Connecting to "+usbLink.Description+" ...";
+                    StartCoroutine(WaitForTcpAndCompleteSession(usbLink));
+                }
+                else if(nfSourceType==NfSourceType.Tcp)
                 {
                     var tcpReader=new NfTcpReader(nfTcpHost,nfTcpPort);nfReader=tcpReader;sessionStarting=true;
                     nfConnectionStatus="Connecting to "+tcpReader.Description+" ...";
@@ -521,7 +547,7 @@ namespace LeafGame
             catch(Exception e){Fatal(e.Message);}
         }
 
-        IEnumerator WaitForTcpAndCompleteSession(NfTcpReader tcpReader)
+        IEnumerator WaitForTcpAndCompleteSession(INfReader tcpReader)
         {
             double deadline=MonotonicClock.Now+Math.Max(0.1,nfTcpTimeoutSec);
             while(state==AppState.Setup&&!tcpReader.IsReady&&string.IsNullOrEmpty(tcpReader.Error)&&MonotonicClock.Now<deadline)yield return null;
@@ -637,6 +663,7 @@ namespace LeafGame
             trial=trials[trialIndex];trialFrame=0;finishQueued=false;colorsRevealed=false;colorOnsetCommitted=false;
             inGreen=false;inFeedback=false;accuracy=false;revealTimeout=false;responseTimeout=false;
             participantResponse=missedResponseText;feedbackText="";nfCurrent=0;nfLevel=0;greenHoldFrames=0;previousPhaseSlot=-1;droppedCount=0;
+            nfLastFreshClock=MonotonicClock.Now;nfStallWarned=false;
             trialStartClock=trialStartTime=cueOnsetTime=firstGreenTime=colorOnsetTime=reactionTime=double.NaN;
             traceRows.Clear();droppedRows.Clear();ssvepRows.Clear();
             preCueFrames=startTrialWithCue?0:Math.Max(1,Mathf.RoundToInt((float)((PreCueConstantSec+TrialPlanner.TruncatedExponential(PreCueExpMeanSec,PreCueExpMaxSec,rng))/ifi)));
@@ -670,7 +697,15 @@ namespace LeafGame
             trialFrame++;bool preCue=trialFrame<cueOnsetFrame;
             bool readOk=nfReader.TryRead(trial.NfIndex,out double fresh);
             if(readOk){nfCurrent=fresh;nfLastFreshClock=MonotonicClock.Now;}
-            else if((nfSourceType==NfSourceType.Tcp||nfSourceType==NfSourceType.BciCore)&&!nfStallWarned&&nfStreamStallWarnSec>0&&MonotonicClock.Now-nfLastFreshClock>=nfStreamStallWarnSec)
+            if(nfSourceType==NfSourceType.UsbBiosemi&&usbNfStallAbortSec>0&&
+                MonotonicClock.Now-nfLastFreshClock>=usbNfStallAbortSec)
+            {
+                triggers.Send("trialstop",trialStopTrigger);
+                Fatal("No fresh USB Biosemi NF record for "+usbNfStallAbortSec.ToString("F1",CultureInfo.InvariantCulture)+
+                    " seconds. Check the P bridge NF count and shared file path before starting another block.");
+                return;
+            }
+            else if((nfSourceType==NfSourceType.Tcp||nfSourceType==NfSourceType.BciCore||nfSourceType==NfSourceType.UsbBiosemi)&&!nfStallWarned&&nfStreamStallWarnSec>0&&MonotonicClock.Now-nfLastFreshClock>=nfStreamStallWarnSec)
             {
                 nfStallWarned=true;
                 string extra=nfSourceType==NfSourceType.BciCore?" Board may not be sending NF frames (check firmware/DSP pipeline).":"";

@@ -13,7 +13,7 @@ namespace LeafGame
 {
     public enum Direction4 { Up, Down, Left, Right }
     public enum CueKind { C1, C2 }
-    public enum NfSourceType { File, Tcp, BciCore }
+    public enum NfSourceType { File, Tcp, BciCore, UsbBiosemi }
 
     [Serializable]
     public sealed class TrialDefinition
@@ -163,6 +163,11 @@ namespace LeafGame
         string Error { get; }
         string Description { get; }
         bool TryRead(int zeroBasedIndex,out double value);
+    }
+
+    public interface INfPairReader : INfReader
+    {
+        bool TryReadPair(out double first,out double second);
     }
 
     public sealed class NfBinaryReader : INfReader

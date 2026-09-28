@@ -181,6 +181,7 @@ namespace LeafGame
             {
                 DrawSetupBackground();
                 if(settingsVisible)DrawSettingsScreen(safe,u);else DrawWelcomeScreen(safe,u);
+                if(sharedAppManaged)DrawExitToMenuButton(safe,u);
                 return;
             }
             float mx=Mathf.Max(14*u,safe.width*0.035f);
@@ -229,6 +230,12 @@ namespace LeafGame
                 GUI.Box(card,GUIContent.none,aestheticPanelStyle);
                 GUI.Label(new Rect(card.x+24*u,card.y+24*u,card.width-48*u,card.height-48*u),fatalMessage,errorStyle);
             }
+            if(sharedAppManaged&&(state==AppState.Instructions||state==AppState.Fatal))DrawExitToMenuButton(safe,u);
+        }
+
+        void DrawExitToMenuButton(Rect safe,float u)
+        {
+            if(GUI.Button(new Rect(safe.x+16*u,safe.yMax-70*u,190*u,50*u),"Exit to menu",secondaryButtonStyle))ExitToMainMenu();
         }
 
         void DrawSetupBackground()
@@ -331,7 +338,7 @@ namespace LeafGame
             float stopW = 140 * u;
             float stopH = 40 * u;
             Rect stopRect = new Rect(safe.x + 14 * u, safe.y + 12 * u, stopW, stopH);
-            string stopText = stopConfirmCountdown > 0 ? "Confirm Stop?" : "Stop Session";
+            string stopText = stopConfirmCountdown > 0 ? "Confirm exit?" : "Exit to menu";
             Color prevColor = GUI.color;
             GUI.color = stopConfirmCountdown > 0 ? new Color(1f, 0.35f, 0.35f) : new Color(0.9f, 0.5f, 0.5f);
             if (GUI.Button(stopRect, stopText, secondaryButtonStyle))
@@ -339,9 +346,8 @@ namespace LeafGame
                 if (stopConfirmCountdown > 0)
                 {
                     stopConfirmCountdown = 0;
-                    StartSessionExport(() => {
-                        if (sharedAppManaged) ReturnToSharedLauncher(); else state = AppState.Setup;
-                    });
+                    if(sharedAppManaged)ExitToMainMenu();
+                    else StartSessionExport(() => state = AppState.Setup);
                 }
                 else
                 {

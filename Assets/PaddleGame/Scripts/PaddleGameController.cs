@@ -422,6 +422,14 @@ namespace PaddleGame
             state = GameState.Summary;
         }
 
+        void ExitToMainMenu()
+        {
+            if (state == GameState.Trial) triggers?.Send("trialstop", trialStopTrigger);
+            state = GameState.Summary;
+            logger?.Flush();
+            ReturnToSharedLauncher();
+        }
+
         void Fatal(string message)
         {
             fatalMessage = message;
@@ -443,6 +451,12 @@ namespace PaddleGame
             if (state == GameState.Calibration) return;
             BuildStyles();
             Fill(new Rect(0, 0, Screen.width, Screen.height), Render(backgroundColor));
+            if (GUI.Button(new Rect(Screen.width - 244 * UiScale(), 96 * UiScale(), 220 * UiScale(), 54 * UiScale()),
+                "Exit to menu", buttonStyle))
+            {
+                ExitToMainMenu();
+                return;
+            }
 
             if (state == GameState.WaitingForLaunch)
             {

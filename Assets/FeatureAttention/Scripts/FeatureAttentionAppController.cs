@@ -6,6 +6,7 @@ using System.Text;
 using LeafGame;
 using PaddleGame;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace FeatureAttention
 {
@@ -47,6 +48,10 @@ namespace FeatureAttention
         readonly List<SettingEntry> leafEntries = new List<SettingEntry>();
         readonly List<SettingEntry> paddleEntries = new List<SettingEntry>();
         readonly Vector2[] scroll = new Vector2[3];
+        Rect settingsViewport;
+        bool settingsTouchDragging;
+        Vector2 settingsLastTouch;
+        SettingsTab settingsDragTab;
 
         LeafGameController leafTemplate;
         PaddleGameController paddleTemplate;
@@ -163,6 +168,36 @@ namespace FeatureAttention
             return result.ToString();
         }
 
+        void Update()
+        {
+            if (screen != ScreenState.Settings)
+            {
+                settingsTouchDragging = false;
+                return;
+            }
+
+            var touch = Touchscreen.current?.primaryTouch;
+            if (touch == null) return;
+            Vector2 point = touch.position.ReadValue();
+            point.y = Screen.height - point.y;
+            if (touch.press.wasPressedThisFrame && settingsViewport.Contains(point))
+            {
+                settingsTouchDragging = true;
+                settingsDragTab = tab;
+                settingsLastTouch = point;
+            }
+            if (settingsTouchDragging && touch.press.isPressed && settingsDragTab == tab)
+            {
+                float deltaY = point.y - settingsLastTouch.y;
+                int tabIndex = (int)tab;
+                float maximum = Mathf.Max(0, ContentHeight(EntriesFor(tab), UiScale()) - settingsViewport.height);
+                scroll[tabIndex].y = Mathf.Clamp(scroll[tabIndex].y - deltaY, 0, maximum);
+                settingsLastTouch = point;
+            }
+            if (touch.press.wasReleasedThisFrame || settingsDragTab != tab)
+                settingsTouchDragging = false;
+        }
+
         void OnGUI()
         {
             BuildStyles();
@@ -193,10 +228,18 @@ namespace FeatureAttention
             float buttonY = card.y + 385 * u;
             if (GUI.Button(new Rect(card.x + 30 * u, buttonY, buttonWidth, 78 * u), "Play Leaf Game", ColoredButtonStyle(leafButtonTexture))) LaunchLeaf();
             if (GUI.Button(new Rect(card.x + 48 * u + buttonWidth, buttonY, buttonWidth, 78 * u), "Play Paddle Game", ColoredButtonStyle(paddleButtonTexture))) LaunchPaddle();
-            if (GUI.Button(new Rect(card.center.x - 190 * u, card.yMax - 88 * u, 380 * u, 58 * u), "Settings", buttonStyle))
+            float actionGap = 18 * u;
+            float actionWidth = Mathf.Min(260 * u, (card.width - 90 * u - actionGap) * 0.5f);
+            float actionX = card.center.x - actionWidth - actionGap * 0.5f;
+            if (GUI.Button(new Rect(actionX, card.yMax - 88 * u, actionWidth, 58 * u), "Settings", buttonStyle))
             {
                 validationError = "";
                 screen = ScreenState.Settings;
+            }
+            if (GUI.Button(new Rect(actionX + actionWidth + actionGap, card.yMax - 88 * u, actionWidth, 58 * u), "Quit", buttonStyle))
+            {
+                SaveSettings();
+                Application.Quit();
             }
 
             if (!string.IsNullOrEmpty(validationError))
@@ -235,6 +278,7 @@ namespace FeatureAttention
             float viewportY = tabY + 62 * u;
             float errorHeight = string.IsNullOrEmpty(validationError) ? 0 : 46 * u;
             Rect viewport = new Rect(shell.x + 24 * u, viewportY, shell.width - 48 * u, shell.yMax - viewportY - 20 * u - errorHeight);
+            settingsViewport = viewport;
             float contentHeight = ContentHeight(entries, u);
             Rect content = new Rect(0, 0, Mathf.Max(420 * u, viewport.width - 26 * u), contentHeight);
             int tabIndex = (int)tab;

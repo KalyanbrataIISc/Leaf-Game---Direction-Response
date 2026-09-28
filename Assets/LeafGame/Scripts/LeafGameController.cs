@@ -443,18 +443,14 @@ namespace LeafGame
         void Update()
         {
             UpdateAestheticInput();
-<<<<<<< Updated upstream
             if(stopConfirmCountdown > 0) stopConfirmCountdown -= Time.unscaledDeltaTime;
             if(state == AppState.Exporting) return;
-            if(escapeEndsBlock&&state!=AppState.Setup&&EscapePressed()){if(state==AppState.Trial){triggers?.Send("trialstop",trialStopTrigger);finishQueued=true;}StartSessionExport(()=>ShowSummary());return;}
-=======
             if(nfSourceType==NfSourceType.UsbBiosemi&&nfReader!=null&&state!=AppState.Setup&&state!=AppState.Fatal&&!string.IsNullOrEmpty(nfReader.Error))
             {
                 Fatal(nfReader.Error+". Stop this block and check the USB cable and P-system bridge.");
                 return;
             }
-            if(escapeEndsBlock&&state!=AppState.Setup&&EscapePressed()){if(state==AppState.Trial){triggers?.Send("trialstop",trialStopTrigger);finishQueued=true;}state=AppState.Summary;visuals?.ClearLeaves();visuals?.SetCueVisible(false,Color.clear);return;}
->>>>>>> Stashed changes
+            if(escapeEndsBlock&&state!=AppState.Setup&&EscapePressed()){finishQueued=true;StartSessionExport(()=>ShowSummary());return;}
             if(state==AppState.Trial&&!finishQueued)UpdateTrial();
             else if(state==AppState.Iti)UpdateIti();
         }
@@ -797,7 +793,9 @@ namespace LeafGame
         void QueueFinish(){if(finishQueued)return;finishQueued=true;StartCoroutine(FinishAfterPresentation());}
         IEnumerator FinishAfterPresentation()
         {
-            yield return new WaitForEndOfFrame();triggers.Send("trialstop",trialStopTrigger);double end=Elapsed;
+            yield return new WaitForEndOfFrame();
+            if(state!=AppState.Trial)yield break;
+            triggers.Send("trialstop",trialStopTrigger);double end=Elapsed;
             logger.WriteTrial(trialIndex+1,trialStartTime,trial,cueOnsetTime,firstGreenTime,colorOnsetTime,participantResponse,accuracy,reactionTime,revealTimeout,responseTimeout,end,droppedCount);
             logger.WriteTrace(trialIndex+1,trial.NfIndex+1,traceRows);logger.WriteDropped(trialIndex+1,droppedRows);
             logger.WriteSsvep(trialIndex+1,ssvepRows);accuracyResults.Add(accuracy);
@@ -815,6 +813,14 @@ namespace LeafGame
             Action callback=sharedReturnToLauncher;
             callback?.Invoke();
             Destroy(gameObject);
+        }
+
+        void ExitToMainMenu()
+        {
+            if(!sharedAppManaged||state==AppState.Exporting)return;
+            if(!runtimeInitialized){ReturnToSharedLauncher();return;}
+            finishQueued=true;
+            StartSessionExport(ReturnToSharedLauncher);
         }
 
         bool TryGetDirection(out Direction4 d)

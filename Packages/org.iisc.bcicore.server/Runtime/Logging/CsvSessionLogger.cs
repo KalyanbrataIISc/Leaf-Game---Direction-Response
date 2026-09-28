@@ -1,4 +1,4 @@
-﻿// ============================================================================
+// ============================================================================
 //  CsvSessionLogger.cs — High-performance binary session logger.
 //
 //  During acquisition, all 4 data streams are logged directly to compact binary
@@ -100,6 +100,27 @@ namespace BciCore
         public string SignalsBinPath  { get; }
         public string FeaturesBinPath { get; }
         public string HealthBinPath   { get; }
+        public string ConfigPath      { get; }
+
+        readonly DateTime _startTime;
+        DateTime? _endTime;
+        BciConfig? _config;
+        readonly int _numCh;
+        long _rawCount;
+        long _sigCount;
+        long _featCount;
+        long _hlthCount;
+        uint? _firstSeq;
+        uint? _lastSeq;
+        uint? _lastSeenSeq;
+        long _totalGaps;
+        long _gapEvents;
+        uint _lastBoardDrops;
+        uint _lastBoardBad;
+        uint _lastBoardMiss;
+        uint _peakDspUs;
+        readonly System.Collections.Generic.HashSet<ushort> _markers = new();
+        bool _isCca;
 
         public string RawPath         => Path.ChangeExtension(RawBinPath, ".csv");
         public string SignalsPath     => Path.ChangeExtension(SignalsBinPath, ".csv");
@@ -112,6 +133,10 @@ namespace BciCore
             string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
             SessionDir = Path.Combine(logDir, $"eeg_{ts}");
             Directory.CreateDirectory(SessionDir);
+            _startTime = DateTime.Now;
+            _numCh = numCh > 0 ? numCh : 32;
+            ConfigPath = Path.Combine(SessionDir, $"eeg_{ts}_config.txt");
+            WriteConfigFile("ACTIVE (Recording in progress...)");
 
             // ── raw.bin ── (134 B / sample)
             RawBinPath = Path.Combine(SessionDir, $"eeg_{ts}_raw.bin");
@@ -187,6 +212,16 @@ namespace BciCore
         public void WriteRaw(uint seq, int[] counts, ushort marker)
         {
             if (_raw == null || counts == null) return;
+            _rawCount++;
+            if (!_firstSeq.HasValue) _firstSeq = seq;
+            if (_lastSeenSeq.HasValue && seq > _lastSeenSeq.Value + 1)
+            {
+                _totalGaps += (seq - _lastSeenSeq.Value - 1);
+                _gapEvents++;
+            }
+            _lastSeenSeq = seq;
+            _lastSeq = seq;
+            if (marker != 0) _markers.Add(marker);
             _raw.Enqueue(new RawLogItem(seq, counts, marker));
         }
 
@@ -194,6 +229,19 @@ namespace BciCore
         public void WriteSignals(uint seq, float[] uv, ushort marker)
         {
             if (_sig == null || uv == null) return;
+            _sigCount++;
+            if (!_firstSeq.HasValue) _firstSeq = seq;
+            if (_rawCount == 0)
+            {
+                if (_lastSeenSeq.HasValue && seq > _lastSeenSeq.Value + 1)
+                {
+                    _totalGaps += (seq - _lastSeenSeq.Value - 1);
+                    _gapEvents++;
+                }
+                _lastSeenSeq = seq;
+            }
+            _lastSeq = seq;
+            if (marker != 0) _markers.Add(marker);
             _sig.Enqueue(new SignalLogItem(seq, uv, marker));
         }
 
@@ -201,6 +249,9 @@ namespace BciCore
         public void WriteFeatures(uint seq, NfSample nf, float[] alpha)
         {
             if (_feat == null) return;
+            _featCount++;
+            _isCca = false;
+            if (nf.Marker != 0) _markers.Add(nf.Marker);
             _feat.Enqueue(new FeatureLogItem(
                 isCca: false, marker: nf.Marker, seq: seq,
                 v1: nf.Smi14gt18, v2: nf.Smi18gt14,
@@ -213,6 +264,9 @@ namespace BciCore
         public void WriteCcaFeatures(uint seq, CcaSample cca, float[] alpha)
         {
             if (_feat == null) return;
+            _featCount++;
+            _isCca = true;
+            if (cca.Marker != 0) _markers.Add(cca.Marker);
             _feat.Enqueue(new FeatureLogItem(
                 isCca: true, marker: cca.Marker, seq: seq,
                 v1: cca.FbAgtB, v2: cca.FbBgtA,
@@ -225,6 +279,12 @@ namespace BciCore
         public void WriteHealth(HealthFrame h, long pcGaps, long srvBad, string evt = "")
         {
             if (_hlth == null) return;
+            _hlthCount++;
+            _lastBoardDrops = h.BoardDrops;
+            _lastBoardBad = h.BoardBad;
+            _lastBoardMiss = h.BoardMiss;
+            if (h.BoardDspMax > _peakDspUs) _peakDspUs = h.BoardDspMax;
+            if (h.Marker != 0) _markers.Add(h.Marker);
             DateTime now = DateTime.Now;
             int wallSec = now.Hour * 3600 + now.Minute * 60 + now.Second;
             _hlth.Enqueue(new HealthLogItem(
@@ -239,10 +299,120 @@ namespace BciCore
         {
             if (_disposed) return;
             _disposed = true;
+            _endTime = DateTime.Now;
             _raw?.Dispose();
             _sig?.Dispose();
             _feat?.Dispose();
             _hlth?.Dispose();
+            WriteConfigFile("COMPLETED");
+        }
+
+        public void SetBoardConfig(BciConfig cfg)
+        {
+            _config = cfg;
+            WriteConfigFile("ACTIVE (Config handshake verified, recording...)");
+        }
+
+        void WriteConfigFile(string status)
+        {
+            try
+            {
+                ushort fs = _config.HasValue && _config.Value.Fs > 0 ? _config.Value.Fs : (ushort)250;
+                byte nch = _config.HasValue && _config.Value.NumCh > 0 ? _config.Value.NumCh : (byte)_numCh;
+                float uvpc = _config.HasValue ? _config.Value.UvPerCount : 0.02235174f;
+                ushort firLen = _config.HasValue ? _config.Value.FirLen : (ushort)61;
+                float dcr = _config.HasValue ? _config.Value.DcR : 0.9995f;
+                byte ach = _config.HasValue && _config.Value.AnalysisCh > 0 ? _config.Value.AnalysisCh : (byte)_analysisCh;
+
+                string hemiLStr = _config.HasValue && _config.Value.HemiL != null && _config.Value.HemiL.Length > 0
+                    ? "[" + string.Join(", ", _config.Value.HemiL) + "]"
+                    : "[0..15]";
+                string hemiRStr = _config.HasValue && _config.Value.HemiR != null && _config.Value.HemiR.Length > 0
+                    ? "[" + string.Join(", ", _config.Value.HemiR) + "]"
+                    : "[16..31]";
+
+                string txMode;
+                if (_rawCount > 0 && _sigCount > 0)
+                    txMode = "RAW + PROC (Signal Validation / Dual Stream Mode)";
+                else if (_rawCount > 0)
+                    txMode = "RAW ONLY (Raw ADC Counts Acquisition / Validation Mode)";
+                else if (_sigCount > 0)
+                    txMode = "PROC ONLY (Filtered Signal Streaming / Live Monitoring Mode)";
+                else
+                    txMode = "CONNECTING (Handshake established, waiting for data frames)";
+
+                string featStr = _featCount > 0 ? $"Active ({(_isCca ? "CCA" : "SMI")})" : "None";
+
+                DateTime end = _endTime ?? DateTime.Now;
+                double durS = (end - _startTime).TotalSeconds;
+                int durM = (int)durS / 60;
+                int durSec = (int)durS % 60;
+                int durH = durM / 60;
+                durM %= 60;
+                string durFmt = $"{durS:F2} s ({durH:D2}h {durM:D2}m {durSec:D2}s)";
+
+                string firstS = _firstSeq.HasValue ? _firstSeq.Value.ToString() : "N/A";
+                string lastS = _lastSeq.HasValue ? _lastSeq.Value.ToString() : "N/A";
+                long totalSamples = Math.Max(_rawCount, _sigCount);
+                long expectedSamples = (_firstSeq.HasValue && _lastSeq.HasValue) ? (_lastSeq.Value - _firstSeq.Value + 1) : totalSamples;
+                double dropRate = (totalSamples + _totalGaps > 0) ? ((double)_totalGaps / (totalSamples + _totalGaps) * 100.0) : 0.0;
+
+                string markersStr = _markers.Count > 0 ? "[" + string.Join(", ", _markers) + "]" : "None";
+                string sessionName = Path.GetFileName(SessionDir);
+
+                var sb = new StringBuilder();
+                sb.AppendLine(new string('=', 80));
+                sb.AppendLine("  BCI SESSION CONFIGURATION & TELEMETRY REPORT");
+                sb.AppendLine(new string('=', 80));
+                sb.AppendLine($"Session ID             : {sessionName}");
+                sb.AppendLine($"Session Status         : {status}");
+                sb.AppendLine($"Start Time             : {_startTime:yyyy-MM-dd HH:mm:ss}");
+                sb.AppendLine($"End Time               : {(_endTime.HasValue ? _endTime.Value.ToString("yyyy-MM-dd HH:mm:ss") : "ACTIVE (In progress)")}");
+                sb.AppendLine($"Session Duration       : {durFmt}");
+                sb.AppendLine();
+                sb.AppendLine("-- HARDWARE & PROTOCOL CONFIGURATION ------------------------------------------");
+                sb.AppendLine($"Sampling Rate (SPS)    : {fs} Hz");
+                sb.AppendLine($"Channel Count          : {nch} channels");
+                sb.AppendLine($"ADS1299 Chips Count    : 4 chips");
+                sb.AppendLine($"Scale Factor (uV/count): {uvpc:F8} uV / count");
+                sb.AppendLine($"FIR Filter Length      : {firLen} taps");
+                sb.AppendLine($"DC Blocker Constant (R): {dcr:F4}");
+                sb.AppendLine();
+                sb.AppendLine("-- MONTAGE CONFIGURATION ------------------------------------------------------");
+                sb.AppendLine($"Analysis Channels      : {ach}");
+                sb.AppendLine($"Left Hemisphere Map    : {hemiLStr}");
+                sb.AppendLine($"Right Hemisphere Map   : {hemiRStr}");
+                sb.AppendLine();
+                sb.AppendLine("-- TRANSMISSION MODE & DATA STREAMS -------------------------------------------");
+                sb.AppendLine($"Transmission Mode      : {txMode}");
+                sb.AppendLine($"Feature Stream Mode    : {featStr}");
+                sb.AppendLine();
+                sb.AppendLine("Recorded Data Files:");
+                sb.AppendLine($"  * Raw ADC Counts     : {_rawCount:N0} samples  | Output: {sessionName}_raw.csv");
+                sb.AppendLine($"  * Filtered Signals   : {_sigCount:N0} samples  | Output: {sessionName}_signals.csv");
+                sb.AppendLine($"  * Spectral Features  : {_featCount:N0} hops     | Output: {sessionName}_features.csv");
+                sb.AppendLine($"  * Health Telemetry   : {_hlthCount:N0} records   | Output: {sessionName}_health.csv");
+                sb.AppendLine();
+                sb.AppendLine("-- SEQUENCE & LOSS TELEMETRY --------------------------------------------------");
+                sb.AppendLine($"First Sequence Number  : {firstS}");
+                sb.AppendLine($"Last Sequence Number   : {lastS}");
+                sb.AppendLine($"Expected Samples       : {expectedSamples:N0}");
+                sb.AppendLine($"Recorded Samples       : {totalSamples:N0}");
+                sb.AppendLine($"Missing / Gap Samples  : {_totalGaps:N0} ({dropRate:F4}% drop rate)");
+                sb.AppendLine($"Sequence Gap Events    : {_gapEvents:N0}");
+                sb.AppendLine($"Board Ring Drops       : {_lastBoardDrops:N0}");
+                sb.AppendLine($"Board Bad SPI Frames   : {_lastBoardBad:N0}");
+                sb.AppendLine($"Board Missed DRDY      : {_lastBoardMiss:N0}");
+                sb.AppendLine($"Peak DSP Time (board)  : {_peakDspUs} us");
+                sb.AppendLine($"Event Markers Logged   : {markersStr}");
+                sb.AppendLine(new string('=', 80));
+
+                File.WriteAllText(ConfigPath, sb.ToString(), Encoding.UTF8);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[BciCore] Failed to write session config report: {ex.Message}");
+            }
         }
 
         /// <summary>Batch converts all binary files in this session directory to CSV.</summary>

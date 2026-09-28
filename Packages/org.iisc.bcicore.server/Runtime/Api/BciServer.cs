@@ -225,6 +225,7 @@ namespace BciCore
                 _pendingAlpha.Clear();
                 int ach = cfg.AnalysisCh > 0 ? cfg.AnalysisCh : 16;
                 _logger = new CsvSessionLogger(_logDir, cfg.NumCh, ach);
+                _logger.SetBoardConfig(cfg);
             }
 
             OnHello?.Invoke(cfg);
@@ -296,6 +297,7 @@ namespace BciCore
             if (s == ConnectionState.Connected && _enableLogging && _logger == null)
             {
                 _logger = new CsvSessionLogger(_logDir, Config.NumCh);
+                _logger.SetBoardConfig(Config);
             }
             OnConnectionStateChanged?.Invoke(s);
         }

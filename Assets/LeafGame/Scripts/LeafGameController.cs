@@ -459,7 +459,9 @@ namespace LeafGame
         {
             if(sessionStarting)return;
             settingsValidationError="";
-            if(!TryApplyRuntimeSettings(out settingsValidationError))return;
+            // The shared launcher has already applied and validated its settings.
+            // Reapplying the legacy setup form here can leave this game on its old welcome screen.
+            if(!sharedAppManaged&&!TryApplyRuntimeSettings(out settingsValidationError))return;
             try
             {
                 stylesScale=-1;
@@ -491,7 +493,9 @@ namespace LeafGame
             catch(Exception e)
             {
                 runtimeInitialized=false;
-                settingsValidationError=e.Message;
+                if(nfSourceType==NfSourceType.BciCore)BciServer.StopServer();
+                if(sharedAppManaged)Fatal("Could not start Leaf Game: "+e.Message);
+                else settingsValidationError=e.Message;
                 Debug.LogError(e);
             }
         }

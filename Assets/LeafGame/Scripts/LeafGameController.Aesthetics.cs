@@ -180,8 +180,9 @@ namespace LeafGame
             if(state==AppState.Setup)
             {
                 DrawSetupBackground();
-                if(settingsVisible)DrawSettingsScreen(safe,u);else DrawWelcomeScreen(safe,u);
-                if(sharedAppManaged)DrawExitToMenuButton(safe,u);
+                if(sharedAppManaged)DrawSharedLaunchScreen(safe,u);
+                else if(settingsVisible)DrawSettingsScreen(safe,u);
+                else DrawWelcomeScreen(safe,u);
                 return;
             }
             float mx=Mathf.Max(14*u,safe.width*0.035f);
@@ -246,6 +247,17 @@ namespace LeafGame
                 Color previous=GUI.color;GUI.color=Render(new Color32(7,34,50,255));
                 GUI.DrawTexture(new Rect(0,0,Screen.width,Screen.height),Texture2D.whiteTexture);GUI.color=previous;
             }
+        }
+
+        void DrawSharedLaunchScreen(Rect safe,float u)
+        {
+            float cardW=Mathf.Min(720*u,safe.width*0.88f),cardH=Mathf.Min(220*u,safe.height*0.5f);
+            Rect card=new Rect(safe.center.x-cardW*0.5f,safe.center.y-cardH*0.5f,cardW,cardH);
+            GUI.Box(card,GUIContent.none,aestheticPanelStyle);
+            GUI.Label(new Rect(card.x+30*u,card.y+28*u,card.width-60*u,60*u),"Starting Leaf Game",titleStyle);
+            GUI.Label(new Rect(card.x+30*u,card.y+102*u,card.width-60*u,74*u),
+                string.IsNullOrEmpty(nfConnectionStatus)?"Preparing session...":nfConnectionStatus,bodyStyle);
+            DrawExitToMenuButton(safe,u);
         }
 
         void DrawWelcomeScreen(Rect safe,float u)

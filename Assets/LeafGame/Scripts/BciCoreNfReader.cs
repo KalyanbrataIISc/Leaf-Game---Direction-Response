@@ -15,7 +15,7 @@ using BciCore;
 
 namespace LeafGame
 {
-    public sealed class BciCoreNfReader : INfReader
+    public sealed class BciCoreNfReader : INfPairReader
     {
         double _smi0, _smi1;
         long   _seq = -1, _lastRead = -1;

@@ -178,11 +178,12 @@ MonoBehaviour:
   ResponseTimeoutSec: 4
   FeedbackSec: 1
   ItiSec: 5
-  nfSourceType: 2
+  nfSourceType: 3
   nfFilePath: C:\Users\Kalyanbrata\Documents\MATLAB\FeatureAttention\nf.txt
   nfPathMaximumCharacters: 1024
   nfTcpHost: 10.36.17.144
   nfTcpPort: 5006
+  usbBiosemiPort: 5010
   nfTcpTimeoutSec: 10
   nfStreamStallWarnSec: 2
   dataFolderName: data
@@ -327,6 +328,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PaddleGame.PaddleGameController
   trialsPerSession: 24
+  maxConsecutiveDirectionTrials: 3
   useFixedRandomSeed: 0
   fixedRandomSeed: 918273
   preSpawnDelaySec: 2
@@ -354,7 +356,8 @@ MonoBehaviour:
   targetFrameRate: 120
   verticalSyncCount: 1
   resetTrigger: 0
-  trialStartTrigger: 20
+  trialStartLeftTrigger: 20
+  trialStartRightTrigger: 21
   trialStopTrigger: 30
   udpTriggerPort: 5007
   udpTriggerHost: 10.36.17.144

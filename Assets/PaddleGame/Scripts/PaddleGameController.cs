@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Threading.Tasks;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -20,7 +21,7 @@ namespace PaddleGame
     /// </summary>
     public sealed class PaddleGameController : MonoBehaviour
     {
-        enum GameState { WaitingForLaunch, Calibration, Instructions, Preview, Trial, Feedback, Summary, Fatal }
+        enum GameState { WaitingForLaunch, Calibration, Instructions, Preview, Trial, Feedback, Summary, Exporting, Fatal }
 
         [Header("Experiment Design")]
         [Tooltip("Must be even so the session contains exactly the same number of left and right cues.")]
@@ -97,7 +98,7 @@ namespace PaddleGame
         [SerializeField] string beginButtonLabel = "Begin session";
 
         [NonSerialized] bool sharedLaunchConfigured;
-        [NonSerialized] bool sharedEnableBciLogging = true;
+        [NonSerialized] FeatureAttention.EegLoggingMode sharedEegLoggingMode = FeatureAttention.EegLoggingMode.BinaryThenCsv;
         [NonSerialized] Action sharedReturnToLauncher;
         [NonSerialized] string participant = "000";
         [NonSerialized] string session = "000";
@@ -117,12 +118,14 @@ namespace PaddleGame
         double lastNfAt;
         string feedbackText = "";
         string fatalMessage = "";
+        float exportProgressFraction;
+        string exportStatusMessage = "";
 
-        public void ConfigureSharedLaunch(string participantNumber, string sessionNumber, bool enableBciLogging = true, Action returnToLauncher = null)
+        public void ConfigureSharedLaunch(string participantNumber, string sessionNumber, FeatureAttention.EegLoggingMode eegLoggingMode = FeatureAttention.EegLoggingMode.BinaryThenCsv, Action returnToLauncher = null)
         {
             participant = string.IsNullOrWhiteSpace(participantNumber) ? "000" : participantNumber.Trim();
             session = string.IsNullOrWhiteSpace(sessionNumber) ? "000" : sessionNumber.Trim();
-            sharedEnableBciLogging = enableBciLogging;
+            sharedEegLoggingMode = eegLoggingMode;
             sharedReturnToLauncher = returnToLauncher;
             sharedLaunchConfigured = true;
         }
@@ -188,7 +191,9 @@ namespace PaddleGame
                 }
                 else
                 {
-                    BciServer.StartServer(enableLogging: sharedEnableBciLogging);
+                    BciServer.StartServer(
+                        enableLogging: sharedEegLoggingMode != FeatureAttention.EegLoggingMode.Disabled,
+                        directCsvMode: sharedEegLoggingMode == FeatureAttention.EegLoggingMode.DirectCsv);
                     triggers = new BciCoreTriggerSender(udpTriggerHost.Trim(), udpTriggerPort);
                     triggers.Send("reset", resetTrigger);
                     state = GameState.Calibration;
@@ -419,15 +424,60 @@ namespace PaddleGame
         {
             if (state == GameState.Trial) triggers?.Send("trialstop", trialStopTrigger);
             logger?.Flush();
-            state = GameState.Summary;
+            logger = null;
+            StartExportThenReturn(false);
         }
 
         void ExitToMainMenu()
         {
             if (state == GameState.Trial) triggers?.Send("trialstop", trialStopTrigger);
-            state = GameState.Summary;
             logger?.Flush();
-            ReturnToSharedLauncher();
+            logger = null;
+            StartExportThenReturn(true);
+        }
+
+        void StartExportThenReturn(bool skipSummary)
+        {
+            if (state == GameState.Exporting) return;
+            state = GameState.Exporting;
+            exportProgressFraction = 0.05f;
+            exportStatusMessage = "Flushing binary logs...";
+
+            if (connectionMode == PaddleConnectionMode.BciCore)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await BciServer.ConvertCurrentSessionToCsvAsync((p, status) =>
+                        {
+                            exportProgressFraction = p;
+                            exportStatusMessage = status;
+                        });
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError("[PaddleGame] EEG export failed: " + e.Message);
+                    }
+                    finally
+                    {
+                        MainThreadDispatcher.Enqueue(() =>
+                        {
+                            if (skipSummary)
+                                ReturnToSharedLauncher();
+                            else
+                                state = GameState.Summary;
+                        });
+                    }
+                });
+            }
+            else
+            {
+                if (skipSummary)
+                    ReturnToSharedLauncher();
+                else
+                    state = GameState.Summary;
+            }
         }
 
         void Fatal(string message)
@@ -472,6 +522,19 @@ namespace PaddleGame
                 Fill(card, new Color(0.06f, 0.10f, 0.17f, 0.96f));
                 GUI.Label(new Rect(card.x + 30, card.y + 24, card.width - 60, card.height - 120), instructionsText, bodyStyle);
                 if (GUI.Button(new Rect(card.center.x - 170 * UiScale(), card.yMax - 76 * UiScale(), 340 * UiScale(), 54 * UiScale()), beginButtonLabel, buttonStyle)) BeginSession();
+                return;
+            }
+
+            if (state == GameState.Exporting)
+            {
+                string msg = string.IsNullOrEmpty(exportStatusMessage) ? "Exporting..." : exportStatusMessage;
+                GUI.Label(new Rect(0, Screen.height * 0.3f, Screen.width, Screen.height * 0.2f), "Exporting EEG data...", titleStyle);
+                GUI.Label(new Rect(Screen.width * 0.1f, Screen.height * 0.52f, Screen.width * 0.8f, Screen.height * 0.1f), msg, bodyStyle);
+                float barW = Screen.width * 0.6f;
+                float barX = (Screen.width - barW) * 0.5f;
+                float barY = Screen.height * 0.64f;
+                Fill(new Rect(barX, barY, barW, 14 * UiScale()), Render(new Color(0.15f, 0.2f, 0.28f)));
+                Fill(new Rect(barX, barY, barW * Mathf.Clamp01(exportProgressFraction), 14 * UiScale()), Render(new Color(0.18f, 0.82f, 0.42f)));
                 return;
             }
 

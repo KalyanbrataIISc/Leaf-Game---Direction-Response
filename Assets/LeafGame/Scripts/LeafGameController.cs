@@ -186,7 +186,7 @@ namespace LeafGame
         [SerializeField] string block="000";
 
         [NonSerialized] bool sharedAppManaged;
-        [NonSerialized] bool sharedEnableBciLogging=true;
+        [NonSerialized] FeatureAttention.EegLoggingMode sharedEegLoggingMode = FeatureAttention.EegLoggingMode.BinaryThenCsv;
         [NonSerialized] Action sharedReturnToLauncher;
 
         AppState state=AppState.Setup;
@@ -259,11 +259,11 @@ namespace LeafGame
         }
 
         /// <summary>Called by the Feature Attention Games launcher before this component starts.</summary>
-        public void ConfigureSharedLaunch(string participantNumber,string sessionNumber,bool enableBciLogging=true,Action returnToLauncher=null)
+        public void ConfigureSharedLaunch(string participantNumber, string sessionNumber, FeatureAttention.EegLoggingMode eegLoggingMode = FeatureAttention.EegLoggingMode.BinaryThenCsv, Action returnToLauncher = null)
         {
-            participant=string.IsNullOrWhiteSpace(participantNumber)?"000":participantNumber.Trim();
-            block=string.IsNullOrWhiteSpace(sessionNumber)?"000":sessionNumber.Trim();
-            sharedEnableBciLogging=enableBciLogging;
+            participant = string.IsNullOrWhiteSpace(participantNumber) ? "000" : participantNumber.Trim();
+            block = string.IsNullOrWhiteSpace(sessionNumber) ? "000" : sessionNumber.Trim();
+            sharedEegLoggingMode = eegLoggingMode;
             sharedReturnToLauncher=returnToLauncher;
             sharedAppManaged=true;
         }
@@ -301,7 +301,9 @@ namespace LeafGame
             if(nfSourceType==NfSourceType.BciCore)
             {
                 // BciCore: start the in-process TCP server and wire BciCoreTriggerSender (TCP + UDP fallback).
-                BciServer.StartServer(enableLogging:sharedEnableBciLogging);
+                BciServer.StartServer(
+                        enableLogging: sharedEegLoggingMode != FeatureAttention.EegLoggingMode.Disabled,
+                        directCsvMode: sharedEegLoggingMode == FeatureAttention.EegLoggingMode.DirectCsv);
                 triggers=new BciCoreTriggerSender(nfTcpHost.Trim(),triggerPort);
                 triggers.Send("reset",resetTrigger);
             }

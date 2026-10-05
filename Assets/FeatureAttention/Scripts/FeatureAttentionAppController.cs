@@ -10,6 +10,17 @@ using UnityEngine.InputSystem;
 
 namespace FeatureAttention
 {
+    /// <summary>EEG session logging strategy.</summary>
+    public enum EegLoggingMode
+    {
+        /// <summary>Write compact binary files during acquisition; convert to CSV at session end.</summary>
+        BinaryThenCsv,
+        /// <summary>Format data directly to CSV rows in real-time; no post-session conversion needed.</summary>
+        DirectCsv,
+        /// <summary>Disable all EEG file logging (data still streamed to the ring buffer).</summary>
+        Disabled
+    }
+
     /// <summary>Shared launcher and persistent settings surface for both experiments.</summary>
     public sealed class FeatureAttentionAppController : MonoBehaviour
     {
@@ -22,7 +33,7 @@ namespace FeatureAttention
             [Header("Application")]
             public string launcherTitle = "Feature Attention Games";
             public string launcherSubtitle = "Choose a task, calibrate the BCI, and begin the session.";
-            public bool enableBciCsvLogging = true;
+            public EegLoggingMode eegLoggingMode = EegLoggingMode.BinaryThenCsv;
 
             [Header("Participant and Session")]
             public string participantNumber = "000";
@@ -433,7 +444,7 @@ namespace FeatureAttention
             var controller = gameObjectInstance.AddComponent<LeafGameController>();
             JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(leafTemplate), controller);
             controller.enabled = true;
-            controller.ConfigureSharedLaunch(common.participantNumber, common.sessionNumber, common.enableBciCsvLogging, ReturnFromGame);
+            controller.ConfigureSharedLaunch(common.participantNumber, common.sessionNumber, common.eegLoggingMode, ReturnFromGame);
             enabled = false;
             gameObjectInstance.SetActive(true);
         }
@@ -447,7 +458,7 @@ namespace FeatureAttention
             var controller = gameObjectInstance.AddComponent<PaddleGameController>();
             JsonUtility.FromJsonOverwrite(JsonUtility.ToJson(paddleTemplate), controller);
             controller.enabled = true;
-            controller.ConfigureSharedLaunch(common.participantNumber, common.sessionNumber, common.enableBciCsvLogging, ReturnFromGame);
+            controller.ConfigureSharedLaunch(common.participantNumber, common.sessionNumber, common.eegLoggingMode, ReturnFromGame);
             enabled = false;
             gameObjectInstance.SetActive(true);
         }

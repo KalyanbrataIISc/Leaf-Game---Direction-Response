@@ -1,4 +1,4 @@
-// ============================================================================
+﻿// ============================================================================
 //  CalibrationScreen.cs — Replicates the Python BCI Telemetry V2 GUI inside Unity.
 //
 //  Layout (IMGUI — matches existing LeafGameController IMGUI style):
@@ -974,11 +974,12 @@ namespace LeafGame
             GUI.DrawTexture(r, Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float pad = Mathf.Round(16f * s);
-            float bh  = Mathf.Round(40f * s);
+            float pad    = Mathf.Round(12f * s);
+            float btnGap = Mathf.Round(8f * s);
+            float bh     = Mathf.Round(38f * s);
 
             // Back button (left aligned)
-            float backW = Mathf.Round(150f * s);
+            float backW = Mathf.Round(95f * s);
             Rect backBtn = new Rect(r.x + pad, r.y + (r.height - bh) * 0.5f, backW, bh);
             GUI.color = new Color(0.7f, 0.75f, 0.85f);
             if (GUI.Button(backBtn, "<  Back", _btnStyle))
@@ -988,17 +989,28 @@ namespace LeafGame
             }
 
             // Stop & Export button (next to Back)
-            float stopW = Mathf.Round(180f * s);
-            Rect stopBtn = new Rect(backBtn.xMax + Mathf.Round(12f * s), r.y + (r.height - bh) * 0.5f, stopW, bh);
+            float stopW = Mathf.Round(135f * s);
+            Rect stopBtn = new Rect(backBtn.xMax + btnGap, r.y + (r.height - bh) * 0.5f, stopW, bh);
             GUI.color = new Color(1f, 0.42f, 0.42f);
-            if (GUI.Button(stopBtn, "Stop & Export CSV", _btnStyle))
+            if (GUI.Button(stopBtn, "Stop & Export", _btnStyle))
             {
                 StartStopAndExport();
             }
 
-            // Proceed button (center aligned)
-            float bw = Mathf.Round(300f * s);
-            Rect btn = new Rect(r.center.x - bw * 0.5f, r.y + (r.height - bh) * 0.5f, bw, bh);
+            // Reboot Firmware button (right of Stop & Export)
+            float rebootW = Mathf.Round(125f * s);
+            Rect rebootBtn = new Rect(stopBtn.xMax + btnGap, r.y + (r.height - bh) * 0.5f, rebootW, bh);
+            GUI.color = new Color(1f, 0.65f, 0.1f);   // amber — distinct from the red stop button
+            if (GUI.Button(rebootBtn, "\u21BA  Reboot", _btnStyle))
+            {
+                BciServer.SendMarker(0xFFFF);   // CMD_REBOOT — board will restart and reconnect
+                Debug.Log("[CalibrationScreen] CMD_REBOOT sent to firmware.");
+            }
+
+            // Proceed button (centered, but guaranteed not to overlap Reboot)
+            float bw = Mathf.Round(240f * s);
+            float proceedX = Mathf.Max(r.center.x - bw * 0.5f, rebootBtn.xMax + Mathf.Round(16f * s));
+            Rect btn = new Rect(proceedX, r.y + (r.height - bh) * 0.5f, bw, bh);
 
             GUI.color = new Color(0.18f, 0.82f, 0.42f);
             if (GUI.Button(btn, "Proceed to Game  >", _btnActiveStyle))

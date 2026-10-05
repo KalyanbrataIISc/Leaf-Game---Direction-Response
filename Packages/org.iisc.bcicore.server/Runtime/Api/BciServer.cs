@@ -35,10 +35,12 @@ namespace BciCore
         public static ChannelRingBuffer RingBuffer { get; private set; }
 
         // ── Session logger ────────────────────────────────────────────────────
-        static CsvSessionLogger _logger;
-        public static string CurrentSessionDir => _logger?.SessionDir ?? LastSessionDir;
+        static CsvSessionLogger       _logger;
+        static DirectCsvSessionLogger _directLogger;
+        public static string CurrentSessionDir => (_logger?.SessionDir ?? _directLogger?.SessionDir) ?? LastSessionDir;
         public static string LastSessionDir { get; private set; }
-        static bool             _enableLogging = true;
+        static bool             _enableLogging  = true;
+        static bool             _directCsvMode  = false;
         static string           _logDir;
         // Buffered alpha for features.csv correlation (seq → alpha[])
         static System.Collections.Generic.Dictionary<uint, float[]> _pendingAlpha
@@ -52,8 +54,19 @@ namespace BciCore
         static long _srvBad;
 
         // ── Direct logger helpers (called from background process thread) ───
-        internal static void LogRaw(uint seq, int[] counts, ushort marker) => _logger?.WriteRaw(seq, counts, marker);
-        internal static void LogProc(uint seq, float[] uv, ushort marker) => _logger?.WriteSignals(seq, uv, marker);
+        /// <summary>True when in direct-CSV mode (no post-session bin conversion needed).</summary>
+        public static bool IsDirectCsvMode => _directCsvMode;
+
+        internal static void LogRaw(uint seq, int[] counts, ushort marker)
+        {
+            _logger?.WriteRaw(seq, counts, marker);
+            _directLogger?.WriteRaw(seq, counts, marker);
+        }
+        internal static void LogProc(uint seq, float[] uv, ushort marker)
+        {
+            _logger?.WriteSignals(seq, uv, marker);
+            _directLogger?.WriteSignals(seq, uv, marker);
+        }
 
         /// <summary>
         /// Log a software-side trigger-sent event to health.csv immediately at the moment
@@ -63,6 +76,10 @@ namespace BciCore
         public static void LogTriggerSent(string name, int code)
         {
             _logger?.WriteHealth(
+                new HealthFrame { Seq = 0, Marker = (ushort)(code & 0xFFFF) },
+                _pcGaps, _srvBad,
+                $"trigger_sent:{name}");
+            _directLogger?.WriteHealth(
                 new HealthFrame { Seq = 0, Marker = (ushort)(code & 0xFFFF) },
                 _pcGaps, _srvBad,
                 $"trigger_sent:{name}");
@@ -116,11 +133,12 @@ namespace BciCore
         /// Start the TCP server and begin listening for the ESP32 (port) and Game fan-out (fanoutPort).
         /// Optionally configure the log directory (pass null to use default).
         /// </summary>
-        public static void StartServer(int port = DefaultPort, int fanoutPort = DefaultFanoutPort, string logDir = null, bool enableLogging = true)
+        public static void StartServer(int port = DefaultPort, int fanoutPort = DefaultFanoutPort, string logDir = null, bool enableLogging = true, bool directCsvMode = false)
         {
             if (_listener != null) return;   // already running
 
             _enableLogging = enableLogging;
+            _directCsvMode = directCsvMode && enableLogging;
             _logDir = string.IsNullOrWhiteSpace(logDir)
                 ? Path.Combine(Application.persistentDataPath, DefaultLogSubDir)
                 : logDir;
@@ -188,6 +206,12 @@ namespace BciCore
                 _logger.Dispose();
                 _logger = null;
             }
+            if (_directLogger != null)
+            {
+                LastSessionDir = _directLogger.SessionDir;
+                _directLogger.Dispose();
+                _directLogger = null;
+            }
             IsUsingProcessedSignals = false;
             State = ConnectionState.Disconnected;
             Debug.Log("[BciCore] Server stopped.");
@@ -198,6 +222,19 @@ namespace BciCore
         /// </summary>
         public static async Task ConvertCurrentSessionToCsvAsync(Action<float, string> onProgress = null)
         {
+            // Direct-CSV mode: files are already written, just flush and return.
+            if (_directCsvMode)
+            {
+                if (_directLogger != null)
+                {
+                    LastSessionDir = _directLogger.SessionDir;
+                    _directLogger.Dispose();
+                    _directLogger = null;
+                }
+                onProgress?.Invoke(1.0f, "Direct CSV mode - no conversion needed.");
+                return;
+            }
+
             string dir = CurrentSessionDir ?? LastSessionDir;
             if (!string.IsNullOrEmpty(dir))
             {
@@ -221,11 +258,20 @@ namespace BciCore
             // Start a new log session on every new connection
             if (_enableLogging)
             {
-                _logger?.Dispose();
+                _logger?.Dispose();       _logger = null;
+                _directLogger?.Dispose(); _directLogger = null;
                 _pendingAlpha.Clear();
                 int ach = cfg.AnalysisCh > 0 ? cfg.AnalysisCh : 16;
-                _logger = new CsvSessionLogger(_logDir, cfg.NumCh, ach);
-                _logger.SetBoardConfig(cfg);
+                if (_directCsvMode)
+                {
+                    _directLogger = new DirectCsvSessionLogger(_logDir, cfg.NumCh, ach);
+                    _directLogger.SetBoardConfig(cfg);
+                }
+                else
+                {
+                    _logger = new CsvSessionLogger(_logDir, cfg.NumCh, ach);
+                    _logger.SetBoardConfig(cfg);
+                }
             }
 
             OnHello?.Invoke(cfg);
@@ -257,6 +303,7 @@ namespace BciCore
             _pendingAlpha.TryGetValue(nf.Seq, out float[] alpha);
             _pendingAlpha.Remove(nf.Seq);
             _logger?.WriteFeatures(nf.Seq, nf, alpha);
+            _directLogger?.WriteFeatures(nf.Seq, nf, alpha);
             OnNfSample?.Invoke(nf);
         }
 
@@ -265,12 +312,14 @@ namespace BciCore
             _pendingAlpha.TryGetValue(cca.Seq, out float[] alpha);
             _pendingAlpha.Remove(cca.Seq);
             _logger?.WriteCcaFeatures(cca.Seq, cca, alpha);
+            _directLogger?.WriteCcaFeatures(cca.Seq, cca, alpha);
             OnCcaSample?.Invoke(cca);
         }
 
         static void InternalOnHealth(HealthFrame h)
         {
             _logger?.WriteHealth(h, _pcGaps, _srvBad);
+            _directLogger?.WriteHealth(h, _pcGaps, _srvBad);
             OnHealth?.Invoke(h);
         }
 
@@ -278,6 +327,7 @@ namespace BciCore
         {
             // Log marker as a health event for the health.csv
             _logger?.WriteHealth(new HealthFrame { Seq = seq, Marker = code }, _pcGaps, _srvBad, "marker");
+            _directLogger?.WriteHealth(new HealthFrame { Seq = seq, Marker = code }, _pcGaps, _srvBad, "marker");
             OnMarker?.Invoke(code, seq);
         }
 
@@ -294,10 +344,18 @@ namespace BciCore
         static void InternalOnStateChanged(ConnectionState s)
         {
             State = s;
-            if (s == ConnectionState.Connected && _enableLogging && _logger == null)
+            if (s == ConnectionState.Connected && _enableLogging && _logger == null && _directLogger == null)
             {
-                _logger = new CsvSessionLogger(_logDir, Config.NumCh);
-                _logger.SetBoardConfig(Config);
+                if (_directCsvMode)
+                {
+                    _directLogger = new DirectCsvSessionLogger(_logDir, Config.NumCh);
+                    _directLogger.SetBoardConfig(Config);
+                }
+                else
+                {
+                    _logger = new CsvSessionLogger(_logDir, Config.NumCh);
+                    _logger.SetBoardConfig(Config);
+                }
             }
             OnConnectionStateChanged?.Invoke(s);
         }
